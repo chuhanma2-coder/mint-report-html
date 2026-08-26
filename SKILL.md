@@ -23,9 +23,10 @@ Use `mint-report-deck` instead when the user explicitly requires PPTX, an exact 
 6. Build one scene per management question. A scene has `min-height: 100svh` but may grow naturally. Use `scroll-snap: proximity`, not mandatory snapping.
 7. Keep every `mustShow` item visible without interaction. Put only supporting detail in expandable regions. In print mode, expand all required detail.
 8. Add stable `data-scene-id`, `data-atom-ref`, `data-field-path`, and `data-edit-policy` attributes. Never create unsupported facts to complete a composition.
-9. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`.
-10. Run `scripts/qa-creative-html.mjs`; then run `scripts/visual-qa-creative.mjs` at 1920×1080, 1280×720, and 390×844. Repair the structured source or art direction, not merely the generated DOM.
-11. Export `report.pdf` with `scripts/export-creative-pdf.mjs`. Verify its content hash matches the current embedded creative model.
+9. Every generated HTML must include the shared creative runtime. It must always provide visible previous/next controls, Left/Right and Up/Down keyboard navigation, a visible edit button, and the `E` shortcut. Every formal text field is editable unless its contract explicitly marks it `derived` or `locked`; this requirement does not depend on the user's prompt.
+10. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`.
+11. Run `scripts/qa-creative-html.mjs`; then run `scripts/visual-qa-creative.mjs` at 1920×1080, 1280×720, and 390×844. Repair the structured source or art direction, not merely the generated DOM.
+12. Export `report.pdf` with `scripts/export-creative-pdf.mjs`. Verify its content hash matches the current embedded creative model.
 
 ## Creative freedom
 
@@ -44,6 +45,7 @@ Do not default to cards, dashboards, fixed 16:9 canvases, or one visual componen
 - Adjacent scenes do not mechanically repeat the same silhouette without a recorded reason.
 - Motion expresses entrance, progression, comparison, change, or focus; it is never decorative noise.
 - Navigation, keyboard movement, details, tabs, charts, media enlargement, and reduced-motion mode work when present.
+- Previous/next controls, Left/Right navigation, the visible edit control, and `E` editing are mandatory. Required editable-field coverage is 100%; navigation, page counters, derived values, and locked source identifiers are never accidentally editable.
 - Necessary information remains complete with motion disabled and in PDF.
 - A failed visual direction may be regenerated once. If it still fails, stop; never fall back to the old card template.
 
