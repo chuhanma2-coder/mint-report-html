@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mint Creative Brief",
+  "type": "object",
+  "required": ["schemaVersion", "status", "narrativeSpine", "scenes", "artDirection"],
+  "properties": {
+    "schemaVersion": { "const": "0.9" },
+    "status": { "enum": ["planned", "needs-confirmation", "repair-required"] },
+    "narrativeSpine": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "managementQuestion", "sceneAnswer", "relationTypes", "atomRefs", "sourceUnitRefs", "mustShow", "expandableDetails", "risksAndBoundaries", "interactionOpportunities", "compositionIntent"],
+        "properties": {
+          "id": { "type": "string" },
+          "managementQuestion": { "type": "string", "minLength": 1 },
+          "sceneAnswer": { "type": "string", "minLength": 1 },
+          "relationTypes": { "type": "array", "items": { "type": "string" } },
+          "atomRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "sourceUnitRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+          "mustShow": { "type": "array", "items": { "type": "string" } },
+          "expandableDetails": { "type": "array", "items": { "type": "string" } },
+          "risksAndBoundaries": { "type": "array", "items": { "type": "string" } },
+          "interactionOpportunities": { "type": "array", "items": { "type": "string" } },
+          "compositionIntent": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "artDirection": {
+      "type": "object",
+      "required": ["brandAnchors", "visualMood", "motionLanguage", "densityRhythm"],
+      "properties": {
+        "brandAnchors": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "visualMood": { "type": "string" },
+        "motionLanguage": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
+        "densityRhythm": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}
