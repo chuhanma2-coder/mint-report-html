@@ -19,10 +19,10 @@ Use `mint-report-deck` instead when the user explicitly requires PPTX, an exact 
 2. Run `scripts/prepare-creative.mjs` on the raw source. Treat its `source-lock.json`, `content-map.json`, `creative-brief.json`, and `source-ledger.json` as the source of truth.
 3. If status is `needs-confirmation`, ask only about the listed fact boundary or capacity issue. Do not reduce the source map to pass.
 4. Establish one coherent art direction for the full report. Read `references/creative-art-direction.md`.
-5. Create a self-contained `report.html`. Inline CSS, JavaScript, icons, charts, and necessary media. The first screen must have no network dependency.
-6. Build one scene per management question. A scene has `min-height: 100svh` but may grow naturally. Use `scroll-snap: proximity`, not mandatory snapping.
+5. Create a self-contained `report.html`. Inline `assets/mint-creative-tokens.css`, the shared runtime CSS and JavaScript, icons, charts, and necessary media. The first screen must have no network dependency.
+6. Build one scene per management question. On desktop and in PDF, compose the main scene on a fixed 1920×1080 `.mint-scene__stage` and scale the stage uniformly; on mobile, use a controlled same-content reflow that preserves field order and hierarchy. Use `scroll-snap: proximity`, not mandatory snapping.
 7. Keep every `mustShow` item visible without interaction. Put only supporting detail in expandable regions. In print mode, expand all required detail.
-8. Add stable `data-scene-id`, `data-atom-ref`, `data-field-path`, and `data-edit-policy` attributes. Never create unsupported facts to complete a composition.
+8. Add stable `data-scene-id`, `data-atom-ref`, `data-field-path`, and `data-edit-policy` attributes. Every main title must also include `data-title-contract` and `data-title-role`. Never create unsupported facts to complete a composition.
 9. Every generated HTML must include the shared creative runtime. It must always provide visible previous/next controls, Left/Right and Up/Down keyboard navigation, a visible edit button, and the `E` shortcut. Every formal text field is editable unless its contract explicitly marks it `derived` or `locked`; this requirement does not depend on the user's prompt.
 10. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`.
 11. Run `scripts/qa-creative-html.mjs`; then run `scripts/visual-qa-creative.mjs` at 1920×1080, 1280×720, and 390×844. Repair the structured source or art direction, not merely the generated DOM.
@@ -30,9 +30,9 @@ Use `mint-report-deck` instead when the user explicitly requires PPTX, an exact 
 
 ## Creative freedom
 
-Mint brand anchors are fixed: logo treatment, typography hierarchy, core green family, source treatment, and Chinese readability. Codex may freely choose light or dark scenes, supporting colors, spatial composition, illustration language, chart treatment, motion, pacing, and interaction.
+Mint brand anchors are fixed: logo treatment, typography hierarchy, original Scheme C tokens, source treatment, and Chinese readability. Light and white surfaces should occupy about 72%–88% of a scene; jade usually occupies 8%–18%; data blue and coral together usually stay below 8%. Jade marks brand and primary emphasis, blue marks data and comparison, and coral marks risk, action, gaps, and alerts. Full-page dark scenes and warm beige/copper surfaces are not the default. Codex remains free to choose spatial composition, illustration language, chart treatment, motion, pacing, and interaction inside these semantic boundaries.
 
-Do not default to cards, dashboards, fixed 16:9 canvases, or one visual component per scene. A scene may combine diagrams, charts, formulas, media, and explanation when that improves understanding.
+Do not default to cards, dashboards, or one visual component per scene. Fixed 16:9 is a composition coordinate system for desktop/PDF, not a fixed card template. A scene may combine diagrams, charts, formulas, media, and explanation when that improves understanding.
 
 ## Hard gates
 
@@ -40,7 +40,7 @@ Do not default to cards, dashboards, fixed 16:9 canvases, or one visual componen
 - Unauthorized new facts, entities, numbers, and formal conclusions are zero.
 - Key numbers, risks, actions, and boundaries are visible and traceable.
 - Parallel, sequence, temporal, causal, comparison, and hierarchy relations are expressed truthfully.
-- Chinese titles break at semantic boundaries; no overflow or unreadably small type.
+- Chinese titles use role-based size ranges, zero negative tracking, no more than two rendered lines, semantic breaks, no punctuation at line start, and no orphan line shorter than three visible characters. Repair in this order: remove repetition, choose semantic breaks, resize the title region, change to a verified long-title composition, adjust within the role range, move supporting detail or add a scene, then block delivery.
 - Every scene has one reading start, one management answer, and an explainable reading path.
 - Adjacent scenes do not mechanically repeat the same silhouette without a recorded reason.
 - Motion expresses entrance, progression, comparison, change, or focus; it is never decorative noise.

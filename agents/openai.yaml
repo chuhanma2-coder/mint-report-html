@@ -1,4 +1,5 @@
 interface:
   display_name: "Mint 动态汇报"
   short_description: "把粗略中文材料做成有逻辑、有动效的 Mint 互动 HTML"
+  brand_color: "#087C66"
   default_prompt: "请把我的材料整理成 Mint 动态汇报。先守住事实和来源，再自由设计整套滚动叙事、动效与互动；默认同时交付 HTML 和当前版本 PDF。"

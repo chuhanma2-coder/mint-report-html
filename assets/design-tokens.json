@@ -1,0 +1,127 @@
+{
+  "schemaVersion": "0.9.1",
+  "palette": {
+    "page": "#F7FBF9",
+    "paper": "#FFFFFF",
+    "ink900": "#18312A",
+    "jade700": "#087C66",
+    "jade500": "#1C957C",
+    "jade300": "#60A895",
+    "jade100": "#E9F5F1",
+    "blue700": "#246A83",
+    "blue500": "#2F86A6",
+    "blue100": "#EAF4F8",
+    "coral700": "#9C4328",
+    "coral500": "#F08A5D",
+    "coral100": "#FFF0E9",
+    "ink600": "#586B65",
+    "line": "#D4E2DD",
+    "onDark": "#FFFFFF",
+    "onDarkSecondary": "#D7E8E2"
+  },
+  "semantic": {
+    "surface.page": "page",
+    "surface.paper": "paper",
+    "surface.subtle": "jade100",
+    "surface.dark": "ink900",
+    "surface.darkRaised": "jade700",
+    "surface.data": "blue100",
+    "surface.risk": "coral100",
+    "text.primary": "ink900",
+    "text.secondary": "ink600",
+    "text.onDark": "onDark",
+    "text.onDarkSecondary": "onDarkSecondary",
+    "text.data": "blue700",
+    "text.risk": "coral700",
+    "accent.primary": "jade700",
+    "accent.support": "jade300",
+    "accent.data": "blue500",
+    "accent.action": "coral500",
+    "accent.secondary": "coral500",
+    "accent.tertiary": "blue500",
+    "border.subtle": "line",
+    "edit.focus": "coral500"
+  },
+  "series": [
+    "jade700",
+    "blue500",
+    "coral500",
+    "jade300",
+    "blue700",
+    "jade500"
+  ],
+  "usage": {
+    "lightSurfaceMin": 0.72,
+    "lightSurfaceMax": 0.88,
+    "jadeMin": 0.08,
+    "jadeMax": 0.18,
+    "blueAndCoralMax": 0.08,
+    "fullPageDarkDefault": false
+  },
+  "typography": {
+    "font.cjk": "PingFang SC",
+    "font.cjkWindows": "Microsoft YaHei",
+    "font.latin": "Arial",
+    "display": {
+      "minPx": 136,
+      "maxPx": 184,
+      "lineHeight": 1.08,
+      "maxLines": 2
+    },
+    "section": {
+      "minPx": 104,
+      "maxPx": 144,
+      "lineHeight": 1.1,
+      "maxLines": 2
+    },
+    "contentTitle": {
+      "minPx": 72,
+      "maxPx": 104,
+      "lineHeight": 1.14,
+      "maxLines": 2
+    },
+    "moduleTitle": {
+      "minPx": 40,
+      "maxPx": 60,
+      "lineHeight": 1.22,
+      "maxLines": 2
+    },
+    "body": {
+      "minPx": 30,
+      "maxPx": 42,
+      "lineHeight": 1.58
+    },
+    "support": {
+      "minPx": 23,
+      "maxPx": 30,
+      "lineHeight": 1.5
+    },
+    "footer": {
+      "minPx": 18,
+      "maxPx": 22,
+      "lineHeight": 1.4
+    },
+    "mobileTitle": {
+      "minPx": 36,
+      "maxPx": 58,
+      "lineHeight": 1.15,
+      "maxLines": 2
+    },
+    "mobileBody": {
+      "minPx": 17,
+      "maxPx": 21,
+      "lineHeight": 1.62
+    }
+  },
+  "canvas": {
+    "desktopWidth": 1920,
+    "desktopHeight": 1080,
+    "mobileBreakpoint": 720,
+    "titleMaxHeightRatio": 0.34,
+    "orphanMinChars": 3
+  },
+  "parity": {
+    "normalizedGeometryTolerance": 0.04,
+    "pdfPerceptualDifferenceMax": 0.005
+  }
+}

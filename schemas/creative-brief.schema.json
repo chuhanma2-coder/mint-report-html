@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schemaVersion", "status", "narrativeSpine", "scenes", "artDirection"],
   "properties": {
-    "schemaVersion": { "const": "0.9" },
+    "schemaVersion": { "const": "0.9.1" },
     "status": { "enum": ["planned", "needs-confirmation", "repair-required"] },
     "narrativeSpine": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
     "scenes": {
@@ -12,11 +12,25 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "managementQuestion", "sceneAnswer", "relationTypes", "atomRefs", "sourceUnitRefs", "mustShow", "expandableDetails", "risksAndBoundaries", "interactionOpportunities", "compositionIntent"],
+        "required": ["id", "managementQuestion", "sceneAnswer", "displayTitle", "titleContract", "relationTypes", "atomRefs", "sourceUnitRefs", "mustShow", "expandableDetails", "risksAndBoundaries", "interactionOpportunities", "compositionIntent"],
         "properties": {
           "id": { "type": "string" },
           "managementQuestion": { "type": "string", "minLength": 1 },
           "sceneAnswer": { "type": "string", "minLength": 1 },
+          "displayTitle": { "type": "string", "minLength": 1 },
+          "titleContract": {
+            "type": "object",
+            "required": ["role", "maxLines", "minPx", "maxPx", "preferredBreaks", "orphanMinChars", "letterSpacing"],
+            "properties": {
+              "role": { "enum": ["display", "section", "content", "module"] },
+              "maxLines": { "const": 2 },
+              "minPx": { "type": "number" },
+              "maxPx": { "type": "number" },
+              "preferredBreaks": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+              "orphanMinChars": { "type": "integer", "minimum": 2 },
+              "letterSpacing": { "const": 0 }
+            }
+          },
           "relationTypes": { "type": "array", "items": { "type": "string" } },
           "atomRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
           "sourceUnitRefs": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
@@ -30,12 +44,15 @@
     },
     "artDirection": {
       "type": "object",
-      "required": ["brandAnchors", "visualMood", "motionLanguage", "densityRhythm"],
+      "required": ["brandAnchors", "visualMood", "motionLanguage", "densityRhythm", "palette", "canvasMode", "densityMode"],
       "properties": {
         "brandAnchors": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
         "visualMood": { "type": "string" },
         "motionLanguage": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
-        "densityRhythm": { "type": "array", "items": { "type": "string" } }
+        "densityRhythm": { "type": "array", "items": { "type": "string" } },
+        "palette": { "const": "mint-scheme-c-original" },
+        "canvasMode": { "const": "dual-fixed-desktop-controlled-mobile" },
+        "densityMode": { "enum": ["speaker-led", "reading-first"] }
       }
     }
   }
