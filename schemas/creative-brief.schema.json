@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schemaVersion", "status", "narrativeSpine", "scenes", "artDirection"],
   "properties": {
-    "schemaVersion": { "const": "0.9.1" },
+    "schemaVersion": { "const": "0.9.3" },
     "status": { "enum": ["planned", "needs-confirmation", "repair-required"] },
     "narrativeSpine": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
     "scenes": {

@@ -3,11 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
 
 const arr = (value) => Array.isArray(value) ? value : [];
 const units = (value) => [...String(value || "")].reduce((sum, char) => sum + (/^[\x00-\xff]$/.test(char) ? 0.55 : 1), 0);
 const compact = (value) => String(value || "").replace(/[\s，。；：、,.!?！？“”‘’"']/g, "");
 const priority = ["causal", "before-after", "sequence", "temporal", "flow", "hierarchy", "comparison", "parallel", "none"];
+const digest = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
 
 function breakTitle(text) {
   const source = String(text || "未命名页面").replace(/[。；]$/, "");
@@ -44,48 +46,78 @@ function classifyGroup(group, graph) {
   return { primaryRelation, pageRole };
 }
 
-function groupSource(map) {
+function clusterSource(map, previousClusters = []) {
   const sourceById = new Map(arr(map.sourceUnits).map((item) => [item.id, item]));
-  const groups = new Map();
-  for (const unit of arr(map.discourseUnits)) {
-    const source = sourceById.get(unit.id) || unit;
-    const key = `${unit.sectionId || source.sectionId || "S1"}:${source.paragraph || 1}`;
-    if (!groups.has(key)) groups.set(key, { key, sectionId: unit.sectionId || source.sectionId || "S1", section: unit.section || source.section || "材料", units: [] });
-    groups.get(key).units.push(unit);
+  const discourse = arr(map.discourseUnits);
+  const edgeByPair = new Map(arr(map.semanticGraph?.edges).map((edge) => {
+    const ids = [edge.source.replace(/^DU:/, ""), edge.target.replace(/^DU:/, "")].sort();
+    return [ids.join("|"), edge];
+  }));
+  const parent = discourse.map((_, index) => index);
+  const find = (index) => parent[index] === index ? index : (parent[index] = find(parent[index]));
+  const join = (a, b) => { const x = find(a), y = find(b); if (x !== y) parent[y] = x; };
+  const pairScore = (left, right, leftIndex, rightIndex) => {
+    const reasons = [];
+    let score = 0;
+    const pair = [left.id, right.id].sort().join("|");
+    const semantic = edgeByPair.get(pair);
+    if (semantic && !semantic.needsReview && semantic.confidence >= .75) { score += 5; reasons.push(`semantic:${semantic.relationType}`); }
+    if (left.listGroup && left.listGroup === right.listGroup) { score += 4; reasons.push("same-parallel-group"); }
+    if ([left.role, right.role].includes("evidence") && [left.role, right.role].includes("claim")) { score += 4; reasons.push("claim-evidence"); }
+    if (left.sectionId === right.sectionId) { score += 3; reasons.push("same-section"); }
+    if (left.subject !== "待确认" && left.subject === right.subject) { score += 2; reasons.push("same-subject"); }
+    if (rightIndex === leftIndex + 1) { score += 1; reasons.push("adjacent"); }
+    if (left.sectionId !== right.sectionId) { score -= 5; reasons.push("topic-shift"); }
+    if (left.subject !== "待确认" && right.subject !== "待确认" && left.subject !== right.subject) { score -= 3; reasons.push("different-subject"); }
+    const combined = units(`${left.text}${right.text}`);
+    if (combined > 1600) { score -= 6; reasons.push("capacity-conflict"); }
+    return { score, reasons, semantic };
+  };
+  const decisions = [];
+  for (let leftIndex = 0; leftIndex < discourse.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < discourse.length; rightIndex += 1) {
+      const result = pairScore(discourse[leftIndex], discourse[rightIndex], leftIndex, rightIndex);
+      const decision = result.score >= 4 ? "merge" : result.score <= 0 ? "split" : "review";
+      decisions.push({ sourceUnitRefs: [discourse[leftIndex].id, discourse[rightIndex].id], score: result.score, decision, reasons: result.reasons });
+      if (decision === "merge") join(leftIndex, rightIndex);
+    }
   }
-  return [...groups.values()].filter((group) => group.units.length);
-}
-
-function partition(groups, count) {
-  if (count <= 1) return [{ key: "MERGED:1", sectionId: groups[0]?.sectionId || "S1", section: groups[0]?.section || "材料", units: groups.flatMap((group) => group.units) }];
-  return Array.from({ length: count }, (_, index) => {
-    const start = Math.floor(index * groups.length / count), end = Math.floor((index + 1) * groups.length / count);
-    const slice = groups.slice(start, Math.max(start + 1, end));
-    return { key: `MERGED:${index + 1}`, sectionId: slice[0]?.sectionId || "S1", section: slice[0]?.section || "材料", units: slice.flatMap((group) => group.units) };
+  const grouped = new Map();
+  discourse.forEach((unit, index) => { const root = find(index); if (!grouped.has(root)) grouped.set(root, []); grouped.get(root).push(unit); });
+  const previous = arr(previousClusters);
+  const claimed = new Set();
+  const groups = [...grouped.values()].map((clusterUnits) => {
+    const refs = clusterUnits.map((unit) => unit.id);
+    const current = new Set(refs);
+    let reuse = null, overlap = 0;
+    for (const candidate of previous) {
+      if (claimed.has(candidate.clusterId)) continue;
+      const prior = new Set(arr(candidate.sourceUnitRefs));
+      const intersection = [...current].filter((ref) => prior.has(ref)).length;
+      const ratio = intersection / Math.max(1, new Set([...current, ...prior]).size);
+      if (ratio > overlap) { overlap = ratio; reuse = candidate; }
+    }
+    const clusterId = reuse && overlap >= .5 ? reuse.clusterId : `MC-${digest(refs.sort().join("|")) .slice(0, 12)}`;
+    if (reuse && overlap >= .5) claimed.add(clusterId);
+    const source = sourceById.get(clusterUnits[0].id) || clusterUnits[0];
+    const clusterDecisions = decisions.filter((item) => item.decision === "merge" && item.sourceUnitRefs.every((ref) => refs.includes(ref)));
+    return { key: clusterId, clusterId, sectionId: clusterUnits[0].sectionId || source.sectionId || "S1", section: clusterUnits[0].section || source.section || "材料", units: clusterUnits, sourceUnitRefs: refs, mergeReasons: [...new Set(clusterDecisions.flatMap((item) => item.reasons))], confidence: clusterDecisions.length ? Math.min(1, Math.max(...clusterDecisions.map((item) => Math.max(0, item.score) / 10))) : 1 };
   });
+  return { groups, decisions };
 }
 
 function managementQuestion(role) {
   return ({ risk: "当前最需要管理层关注什么风险？", action: "下一步要推动什么？", contrast: "相比原方案发生了什么变化？", evidence: "哪些事实和数字说明当前进展？", claim: "这一部分最重要的结论是什么？" })[role] || "这一页需要回答什么？";
 }
 
-export function planDeck(task, map) {
+export function planDeck(task, map, { previousClusters = [] } = {}) {
   const started = performance.now();
   const blockingIssues = [], capacityConflicts = [];
-  let groups = groupSource(map);
-  const maxUnits = task.readingMode === "reading" ? 760 : task.readingMode === "presentation" ? 360 : 520;
+  const clustering = clusterSource(map, previousClusters);
+  const groups = clustering.groups;
+  const maxUnits = task.readingMode === "reading" ? 1800 : task.readingMode === "presentation" ? 1000 : 1400;
   const requested = task.pageContract?.requested;
-  if (task.pageContract?.constraint === "exact" && requested) groups = partition(groups, requested);
-  else {
-    groups = groups.flatMap((group) => {
-      if (units(group.units.map((unit) => unit.text).join("")) <= maxUnits) return [group];
-      const midpoint = Math.ceil(group.units.length / 2);
-      return [
-        { ...group, key: `${group.key}:A`, units: group.units.slice(0, midpoint) },
-        { ...group, key: `${group.key}:B`, units: group.units.slice(midpoint) }
-      ].filter((item) => item.units.length);
-    });
-  }
+  if (task.pageContract?.constraint === "exact" && requested && requested !== groups.length) blockingIssues.push(`创意 HTML 不按指定页数机械切分；当前识别 ${groups.length} 个管理问题。如需精确 ${requested} 页，请使用 mint-report-deck。`);
   for (const group of groups) {
     const size = units(group.units.map((unit) => unit.text).join(""));
     if (size > maxUnits) {
@@ -124,7 +156,7 @@ export function planDeck(task, map) {
       : group.units.length;
     const titleLines = breakTitle(answer);
     return {
-      id: `P${index + 1}`,
+      id: group.clusterId,
       sectionId: group.sectionId,
       sectionTitle: group.section,
       actionTitle: titleLines.join(""),
@@ -149,8 +181,9 @@ export function planDeck(task, map) {
       contentOrder: ["title", "page-answer", "proof-object", ...(pageRole === "action" ? ["action"] : [])],
       focalAnchor: "proof-object",
       densityProfile: units(group.units.map((unit) => unit.text).join("")) > maxUnits * 0.72 ? "compact" : group.units.length <= 2 ? "focused" : "balanced",
-      transitionFromPrevious: index === 0 ? null : { fromPageId: `P${index}`, bridge: `从${groups[index - 1].section}进入${group.section}` },
-      pageNecessity: { type: index === 0 ? "opening" : "independent-decision", reason: `承接独立原文段落 ${group.key}`, removalTest: { losesPrimaryEvidence: true, breaksDecisionChain: pageRole === "action", exceedsCapacityElsewhere: false } }
+      transitionFromPrevious: index === 0 ? null : { fromPageId: groups[index - 1].clusterId, bridge: `从${groups[index - 1].section}进入${group.section}` },
+      pageNecessity: { type: index === 0 ? "opening" : "independent-decision", reason: `回答独立管理问题 ${managementQuestion(pageRole)}`, removalTest: { losesPrimaryEvidence: true, breaksDecisionChain: pageRole === "action", exceedsCapacityElsewhere: false } },
+      clusterContract: { clusterId: group.clusterId, sourceUnitRefs: group.sourceUnitRefs, mergeReasons: group.mergeReasons, confidence: group.confidence }
     };
   });
 
@@ -180,7 +213,9 @@ export function planDeck(task, map) {
     duplicationMap,
     capacityConflicts,
     blockingIssues,
-    metrics: { sourceGroups: groupSource(map).length, pages: pageContracts.length, elapsedMs }
+    managementClusters: groups.map((group, index) => ({ clusterId: group.clusterId, managementQuestion: pageContracts[index].pageQuestion, sourceUnitRefs: group.sourceUnitRefs, relationTypes: [...new Set(pageContracts[index].relationGraphRefs.map((ref) => map.relationships?.find((item) => item.id === ref)?.type).filter(Boolean))], mergeReasons: group.mergeReasons, confidence: group.confidence })),
+    clusteringDecisions: clustering.decisions,
+    metrics: { sourceUnits: arr(map.sourceUnits).length, managementClusters: groups.length, pages: pageContracts.length, elapsedMs }
   };
 }
 

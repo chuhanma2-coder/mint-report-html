@@ -1,0 +1,20 @@
+name: Windows compatibility
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  contracts:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate skill
+        shell: pwsh
+        run: |
+          node tests/v09-contracts.mjs
+          node tests/v091-visual-contracts.mjs
+          node tests/v093-performance-contracts.mjs

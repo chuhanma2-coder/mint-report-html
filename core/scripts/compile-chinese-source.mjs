@@ -21,9 +21,19 @@ export function splitSource(rawText, sourceName) {
   const lines = String(rawText || "").replace(/\r\n?/g, "\n").split("\n");
   const units = [];
   let section = "全文", sectionId = "S1", sectionIndex = 1, listIndex = 0, paragraph = 1;
+  let assetId = null, assetSourcePath = null;
   lines.forEach((rawLine, lineIndex) => {
     const line = rawLine.trim();
     if (!line) { paragraph += 1; listIndex = 0; return; }
+    const assetMarker = line.match(/^<!--\s*MINT_ASSET\s+id="([^"]+)"\s+path="([^"]+)"\s*-->$/);
+    if (assetMarker) {
+      assetId = assetMarker[1];
+      assetSourcePath = assetMarker[2];
+      section = `来源：${assetSourcePath}`;
+      sectionId = `S${++sectionIndex}`;
+      listIndex = 0;
+      return;
+    }
     const heading = line.match(/^(?:#{1,6}\s*|[一二三四五六七八九十]+、)(.+?)[：:]?$/);
     if (heading) {
       section = heading[1].trim();
@@ -39,14 +49,17 @@ export function splitSource(rawText, sourceName) {
       .map((item) => item.trim()).filter(Boolean);
     const group = isBullet && !startsAny(normalized, markers.sequence) ? `${sectionId}:LIST:${listIndex || 1}` : null;
     if (isBullet) listIndex = listIndex || 1;
-    for (const [segmentIndex, segment] of segments.entries()) units.push({ text: segment, section, sectionId, paragraph, line: lineIndex + 1, segment: segmentIndex + 1, listGroup: group });
+    for (const [segmentIndex, segment] of segments.entries()) units.push({ text: segment, section, sectionId, paragraph, line: lineIndex + 1, segment: segmentIndex + 1, listGroup: group, assetId, assetSourcePath });
     if (!isBullet) listIndex = 0;
   });
   const source = sourceId(sourceName);
   return units.map((unit) => {
-    const locator = `${source}#L${unit.line}:S${unit.segment}:P${unit.paragraph}:${unit.sectionId}`;
+    const sourceKey = unit.assetId || source;
+    const locator = `${sourceKey}#L${unit.line}:S${unit.segment}:P${unit.paragraph}:${unit.sectionId}`;
     const textHash = digest(unit.text);
-    return { ...unit, id: `SU-${digest(`${locator}\n${unit.text}`).slice(0, 16)}`, textHash, sourceRef: `SOURCE:${locator}` };
+    // Identity follows the source location, not the mutable text. Text changes are
+    // tracked by textHash so annotations and Scene element IDs survive revisions.
+    return { ...unit, id: `SU-${digest(locator).slice(0, 16)}`, textHash, sourceRef: `${unit.assetId ? "ASSET" : "SOURCE"}:${locator}` };
   });
 }
 
@@ -223,7 +236,8 @@ export function compileChineseSource({ rawText, sourceName = "input", taskCard =
       discourseRefs: [unit.id],
       sourceUnitRefs: [unit.id],
       sourceRef: unit.sourceRef,
-      editBoundary: taskCard?.fidelityMode === "faithful-reflow" ? "protected" : "editable"
+      editBoundary: taskCard?.fidelityMode === "faithful-reflow" ? "protected" : "editable",
+      ...(unit.assetId ? { assetRef: unit.assetId } : {})
       ,...(assertionStatus ? { assertionStatus } : {})
     };
   });
@@ -239,7 +253,7 @@ export function compileChineseSource({ rawText, sourceName = "input", taskCard =
       managementTakeaway: communicationJob.managementTakeaway || "待页面规划后确定"
     },
     sourceSnapshot: { lockRef: "source-lock.json", rawDigest: sourceLock.rawDigest, unitCount: sourceLock.unitCount, unitIdsDigest: digest(sourceLock.unitIds.join("\n")) },
-    sourceUnits: rawUnits.map(({ id, text, textHash, section, sectionId, paragraph, line, sourceRef }) => ({ id, text, textHash, section, sectionId, paragraph, line, sourceRef, immutable: true })),
+    sourceUnits: rawUnits.map(({ id, text, textHash, section, sectionId, paragraph, line, sourceRef, assetId, assetSourcePath }) => ({ id, text, textHash, section, sectionId, paragraph, line, sourceRef, assetId, assetSourcePath, immutable: true })),
     discourseUnits,
     contentAtoms,
     numericClaims,

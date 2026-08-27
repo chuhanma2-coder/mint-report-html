@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 const input = path.resolve(process.argv[2] || "");
 const pdfFile = path.resolve(process.argv[3] || path.join(path.dirname(input || "."), "report.pdf"));
 const manifestFile = path.resolve(process.argv[4] || path.join(path.dirname(pdfFile), "export-manifest.json"));
+const kind = process.argv.find((arg) => arg.startsWith("--kind="))?.slice(7) || "formal";
 if (!fs.existsSync(input)) { console.error("Usage: node export-creative-pdf.mjs report.html [report.pdf] [export-manifest.json]"); process.exit(2); }
 const moduleName = process.env.MINT_PLAYWRIGHT_MODULE || "playwright";
 const { chromium } = await import(moduleName.startsWith("/") ? pathToFileURL(moduleName).href : moduleName);
@@ -39,9 +40,9 @@ try {
   await printPage.close();
   const contentHash = sha(state.model);
   const original = fs.readFileSync(input, "utf8");
-  const updated = original.replace(/<meta name="mint-pdf-state" content="[^"]*">/g, "").replace(/<meta name="mint-pdf-content-hash" content="[^"]*">/g, "").replace("</head>", `<meta name="mint-pdf-state" content="available"><meta name="mint-pdf-content-hash" content="${contentHash}"></head>`);
+  const updated = original.replace(/<meta name="mint-pdf-state" content="[^"]*">/g, "").replace(/<meta name="mint-pdf-content-hash" content="[^"]*">/g, "").replace("</head>", `<meta name="mint-pdf-state" content="${kind === "formal" ? "available" : "preview"}"><meta name="mint-pdf-content-hash" content="${contentHash}"></head>`);
   fs.writeFileSync(input, updated);
-  const manifest = { schemaVersion: "0.9", status: "matched", mode: "creative-scene-snapshot", htmlFile: path.basename(input), pdfFile: path.basename(pdfFile), contentHash, htmlHash: sha(updated), pdfHash: sha(fs.readFileSync(pdfFile)), sceneSnapshotHash: sha(sceneImages.join("")), sceneCount: sceneImages.length, generatedAt: new Date().toISOString(), exportState: { editable: state.editable, visibleControls: state.visibleControls, hiddenDetails: state.hiddenDetails } };
+  const manifest = { schemaVersion: "0.9.3", status: "matched", kind, mode: "creative-scene-snapshot", htmlFile: path.basename(input), pdfFile: path.basename(pdfFile), contentHash, htmlHash: sha(updated), pdfHash: sha(fs.readFileSync(pdfFile)), sceneSnapshotHash: sha(sceneImages.join("")), sceneCount: sceneImages.length, generatedAt: new Date().toISOString(), exportState: { editable: state.editable, visibleControls: state.visibleControls, hiddenDetails: state.hiddenDetails } };
   fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify({ passed: true, pdfFile, manifestFile, contentHash }, null, 2));
 } finally { await browser.close(); }

@@ -64,4 +64,4 @@ https://github.com/chuhanma2-coder/mint-report-html
 
 这是独立 Skill，不会覆盖原来的 `mint-report-deck`。需要可编辑 PPTX、固定页数或严格跨格式一致时，请继续使用 `mint-report-deck`。
 
-当前版本：[v0.9.2](https://github.com/chuhanma2-coder/mint-report-html/releases/tag/v0.9.2)
+当前版本：`v0.9.3`。本版增加素材标准化缓存、管理问题聚合、结构冻结、Scene 模块隔离、稳定元素 ID、真实遮挡门禁和 Review / Revision / Publish 分级执行。

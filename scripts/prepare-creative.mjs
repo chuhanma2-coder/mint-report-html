@@ -4,6 +4,9 @@ import path from "node:path";
 import { classifyTask } from "../core/scripts/classify-task.mjs";
 import { buildSourceLock, compileChineseSource } from "../core/scripts/compile-chinese-source.mjs";
 import { planDeck } from "../core/scripts/plan-deck.mjs";
+import { createProjectState, sessionBrief } from "../core/scripts/project-state.mjs";
+import { normalizeAssets } from "./normalize-assets.mjs";
+import { syncSceneProject } from "./scene-project.mjs";
 
 const source = path.resolve(process.argv[2] || "");
 const output = path.resolve(process.argv[3] || "creative-output");
@@ -13,21 +16,32 @@ if (!fs.existsSync(source)) {
   process.exit(2);
 }
 
-const rawText = fs.readFileSync(source, "utf8");
 const options = optionsFile && fs.existsSync(optionsFile) ? JSON.parse(fs.readFileSync(optionsFile, "utf8")) : {};
+const priorStateFile = path.join(output, "project-state.json");
+const priorClustersFile = path.join(output, "management-clusters.json");
+const priorState = fs.existsSync(priorStateFile) ? JSON.parse(fs.readFileSync(priorStateFile, "utf8")) : null;
+const priorClusters = fs.existsSync(priorClustersFile) ? JSON.parse(fs.readFileSync(priorClustersFile, "utf8")).clusters || [] : [];
+const priorMapFile = path.join(output, "content-map.json");
+const priorMap = fs.existsSync(priorMapFile) ? JSON.parse(fs.readFileSync(priorMapFile, "utf8")) : null;
+const normalization = normalizeAssets(source, output);
+const rawText = normalization.combinedText;
 const task = {
   ...classifyTask({ ...options, rawText, outputMode: "creative-html", outputs: options.outputs || ["html", "pdf", "structure"] }),
-  schemaVersion: "0.9.1"
+  schemaVersion: "0.9.3"
 };
 const map = compileChineseSource({
   rawText,
-  sourceName: path.basename(source),
+  sourceName: path.basename(normalization.normalizedSource),
   taskCard: task,
   communicationJob: options.communicationJob || {},
-  schemaVersion: "0.9.1"
+  schemaVersion: "0.9.3"
 });
-const sourceLock = buildSourceLock({ rawText, sourceName: path.basename(source), sourceUnits: map.sourceUnits });
-const plan = planDeck(task, map);
+const sourceLock = buildSourceLock({ rawText, sourceName: path.basename(normalization.normalizedSource), sourceUnits: map.sourceUnits });
+const refsByAsset = new Map();
+for (const unit of map.sourceUnits) if (unit.assetId) refsByAsset.set(unit.assetId, [...new Set([...(refsByAsset.get(unit.assetId) || []), unit.id])]);
+for (const asset of normalization.manifest.assets) asset.sourceUnitRefs = refsByAsset.get(asset.assetId) || [];
+fs.writeFileSync(path.join(output, "asset-manifest.json"), `${JSON.stringify(normalization.manifest, null, 2)}\n`);
+const plan = planDeck(task, map, { previousClusters: priorClusters });
 const atomById = new Map(map.contentAtoms.map((atom) => [atom.id, atom]));
 const unitRefs = (atomRefs) => [...new Set(atomRefs.flatMap((ref) => atomById.get(ref)?.sourceUnitRefs || []))];
 const relationTypes = (page) => [...new Set([
@@ -71,7 +85,7 @@ const scenes = plan.pageContracts.map((page, index) => {
   const titleRole = titleRoleFor(page, index);
   const displayTitle = displayTitleFor(page.pageAnswer);
   return {
-    id: page.id.replace(/^P/, "S"),
+    id: page.id,
     managementQuestion: page.pageQuestion,
     sceneAnswer: page.pageAnswer,
     displayTitle,
@@ -101,7 +115,7 @@ const briefStatus = task.status === "needs-confirmation" || map.status === "need
   ? "needs-confirmation"
   : plan.status === "repair-required" ? "repair-required" : "planned";
 const brief = {
-  schemaVersion: "0.9.1",
+  schemaVersion: "0.9.3",
   status: briefStatus,
   outputMode: "creative-html",
   narrativeSpine: plan.narrativeSpine,
@@ -118,11 +132,14 @@ const brief = {
   hardBoundaries: ["不得新增原文没有的事实、数字、实体和正式结论", "mustShow 不得依赖交互才能看见", "PDF 必须展开必要详情"],
   blockingIssues: [...new Set([...(plan.blockingIssues || []), ...(map.unknowns || []).map((item) => `待确认主语：${item.text}`), ...(map.conflicts || []).map((item) => `来源冲突：${item.subject}`), ...(map.semanticGraph?.edges || []).filter((edge) => edge.needsReview || edge.confidence < 0.75).map((edge) => `低置信度关系待确认：${edge.id} ${edge.relationType}`)])]
 };
+for (const asset of normalization.manifest.assets.filter((item) => item.status === "needs-asset-review")) brief.blockingIssues.push(`素材 ${asset.sourcePath} 需要确认：${asset.warnings.join("；")}`);
+if (!scenes.length) brief.blockingIssues.push("标准化素材中没有可编译的文本；不得生成空报告");
+if (brief.blockingIssues.length && brief.status === "planned") brief.status = "needs-confirmation";
 
 const sceneByUnit = new Map();
 for (const scene of scenes) for (const unitRef of scene.sourceUnitRefs) sceneByUnit.set(unitRef, scene);
 const ledger = {
-  schemaVersion: "0.9.1",
+  schemaVersion: "0.9.3",
   sourceLockRef: "source-lock.json",
   contentMapRef: "content-map.json",
   creativeBriefRef: "creative-brief.json",
@@ -150,9 +167,26 @@ if (unaccounted.length) {
 fs.mkdirSync(output, { recursive: true });
 const write = (name, value) => fs.writeFileSync(path.join(output, name), `${JSON.stringify(value, null, 2)}\n`);
 write("task-card.json", task);
-write("source-lock.json", { ...sourceLock, schemaVersion: "0.9.1" });
+write("source-lock.json", { ...sourceLock, schemaVersion: "0.9.3", assetManifestRef: "asset-manifest.json", sourceSetHash: normalization.manifest.sourceSetHash });
 write("content-map.json", map);
 write("creative-brief.json", brief);
 write("source-ledger.json", ledger);
-console.log(JSON.stringify({ status: brief.status, scenes: scenes.length, sourceUnits: sourceLock.unitCount, unaccounted: unaccounted.length, output }, null, 2));
+write("management-clusters.json", { schemaVersion: "0.9.3", clusters: plan.managementClusters, decisions: plan.clusteringDecisions });
+const oldOrder = priorState?.currentSceneOrder || [];
+const currentOrder = scenes.map((scene) => scene.id);
+const structuralChange = Boolean(priorState && JSON.stringify(oldOrder) !== JSON.stringify(currentOrder));
+const priorUnitHashes = new Map((priorMap?.sourceUnits || []).map((unit) => [unit.id, unit.textHash]));
+const currentUnitHashes = new Map(map.sourceUnits.map((unit) => [unit.id, unit.textHash]));
+const changedUnits = new Set([...new Set([...priorUnitHashes.keys(), ...currentUnitHashes.keys()])].filter((id) => priorUnitHashes.get(id) !== currentUnitHashes.get(id)));
+const contentChange = Boolean(priorState && changedUnits.size);
+let affectedSceneIds = scenes.filter((scene) => scene.sourceUnitRefs.some((ref) => changedUnits.has(ref))).map((scene) => scene.id);
+if (contentChange && !affectedSceneIds.length) affectedSceneIds = currentOrder;
+const projectState = createProjectState({ prior: priorState, sourceSetHash: normalization.manifest.sourceSetHash, sceneOrder: currentOrder, clusters: plan.managementClusters, artDirectionHash: sourceLock.rawDigest, requestedProfile: options.qaProfile || (priorState ? "revision" : "review"), structuralChange, contentChange, affectedSceneIds, openIssues: brief.blockingIssues });
+projectState.rawDigest = sourceLock.rawDigest;
+projectState.affectedSceneIds = structuralChange || !priorState ? currentOrder : affectedSceneIds;
+write("project-state.json", projectState);
+fs.writeFileSync(path.join(output, "session-brief.md"), sessionBrief(projectState));
+write("build-manifest.json", { schemaVersion: "0.9.3", sourceSetHash: normalization.manifest.sourceSetHash, structureHash: projectState.structureHash, currentSceneOrder: currentOrder, affectedSceneIds: projectState.affectedSceneIds, assets: normalization.manifest.assets.map((asset) => ({ assetId: asset.assetId, sourceHash: asset.sourceHash, contentHash: asset.contentHash, cacheHit: asset.cacheHit })), outputs: { html: "pending", previewPdf: "pending", formalPdf: "pending" }, generatedAt: new Date().toISOString() });
+const sceneProject = syncSceneProject(output);
+console.log(JSON.stringify({ status: brief.status, structureState: projectState.structureState, qaProfile: projectState.qaProfile, scenes: scenes.length, sourceUnits: sourceLock.unitCount, assets: normalization.manifest.assets.length, cacheHits: normalization.manifest.metrics.cacheHits, createdSceneFiles: sceneProject.created.length, unaccounted: unaccounted.length, output }, null, 2));
 process.exit(brief.status === "repair-required" ? 1 : 0);

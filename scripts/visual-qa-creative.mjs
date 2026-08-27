@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { geometryAuditInPage } from "./geometry-audit.mjs";
 
 const input = path.resolve(process.argv[2] || "");
 const outputFile = path.resolve(process.argv[3] || path.join(path.dirname(input || "."), "visual-qa.json"));
@@ -10,7 +11,14 @@ if (!fs.existsSync(input)) { console.error("Usage: node visual-qa-creative.mjs r
 const moduleName = process.env.MINT_PLAYWRIGHT_MODULE || "playwright";
 const { chromium } = await import(moduleName.startsWith("/") ? pathToFileURL(moduleName).href : moduleName);
 const browser = await chromium.launch({ headless: true, executablePath: process.env.MINT_CHROMIUM_EXECUTABLE || undefined });
-const viewports = [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1280, height: 720 }, { name: "mobile", width: 390, height: 844 }];
+const profileArg = process.argv.find((arg) => arg.startsWith("--profile="))?.slice(10);
+const scenesArg = process.argv.find((arg) => arg.startsWith("--scenes="))?.slice(9).split(",").filter(Boolean) || [];
+const stateFile = path.join(path.dirname(input), "project-state.json");
+const projectState = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : null;
+const profile = profileArg || projectState?.qaProfile || "review";
+if (profile === "publish" && projectState?.structureState !== "frozen") { console.error("Publish QA requires structureState=frozen"); process.exit(1); }
+const allViewports = [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1280, height: 720 }, { name: "mobile", width: 390, height: 844 }];
+const viewports = profile === "publish" ? allViewports : [allViewports[0]];
 const issues = [], results = [];
 fs.mkdirSync(shots, { recursive: true });
 for (const viewport of viewports) {
@@ -19,7 +27,9 @@ for (const viewport of viewports) {
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   await page.goto(pathToFileURL(input).href, { waitUntil: "load" });
   await page.evaluate(() => document.fonts.ready);
-  const state = await page.evaluate(() => {
+  const geometryIssues = await page.evaluate(geometryAuditInPage, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
+  for (const issue of geometryIssues) issues.push({ viewport: viewport.name, gate: "geometry-collision", ...issue });
+  const state = await page.evaluate((sceneFilter) => {
     const visible = (node) => { const style = getComputedStyle(node); const box = node.getBoundingClientRect(); return style.display !== "none" && style.visibility !== "hidden" && box.width > 0 && box.height > 0; };
     const renderedLines = (node) => {
       const textNode = [...node.childNodes].find((child) => child.nodeType === Node.TEXT_NODE && child.textContent.trim());
@@ -32,7 +42,7 @@ for (const viewport of viewports) {
       }
       return [...groups.entries()].sort((a,b)=>a[0]-b[0]).map((entry)=>entry[1].trim()).filter(Boolean);
     };
-    const scenes = [...document.querySelectorAll(".mint-scene")];
+    const scenes = [...document.querySelectorAll(".mint-scene")].filter((scene) => !sceneFilter.length || sceneFilter.includes(scene.dataset.sceneId));
     const uncoveredText = scenes.flatMap((scene) => {
       const walker = document.createTreeWalker(scene, NodeFilter.SHOW_TEXT);
       const missing = [];
@@ -65,7 +75,7 @@ for (const viewport of viewports) {
       uncoveredText,
       bodyOverflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2
     };
-  });
+  }, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
   if (state.bodyOverflowX) issues.push({ viewport: viewport.name, gate: "overflow", message: "页面存在横向溢出" });
   if (!state.navVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "导航不可见" });
   if (!state.previousVisible || !state.nextVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "左右翻页控件不可见" });
@@ -110,7 +120,7 @@ for (const viewport of viewports) {
     if (!returned) issues.push({ viewport: viewport.name, gate: "navigation", message: "上一页按钮未返回前一场景" });
   }
   await page.screenshot({ path: path.join(shots, `${viewport.name}.png`), fullPage: true, animations: "disabled" });
-  results.push({ viewport, ...state, runtimeErrors });
+  results.push({ viewport, ...state, geometryIssues, runtimeErrors });
   for (const error of runtimeErrors) issues.push({ viewport: viewport.name, gate: "runtime", message: error });
   await page.close();
 }
@@ -122,7 +132,7 @@ if (printState.hiddenDetails) issues.push({ gate: "print", message: "打印状�
 if (printState.visibleControls) issues.push({ gate: "print", message: "打印状态仍显示交互控件" });
 await printPage.close();
 await browser.close();
-const report = { schemaVersion: "0.9.1", passed: issues.length === 0, results, printState, issues };
+const report = { schemaVersion: "0.9.3", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ passed: report.passed, viewports: results.length, issues: issues.length, outputFile }, null, 2));
 process.exit(report.passed ? 0 : 1);
