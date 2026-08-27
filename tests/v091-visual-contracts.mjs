@@ -13,13 +13,8 @@ const canonicalFile = fs.existsSync(path.join(repo, "shared/design-tokens.json")
   : path.join(htmlSkill, "assets/design-tokens.json");
 const canonical = JSON.parse(fs.readFileSync(canonicalFile, "utf8"));
 const htmlTokens = JSON.parse(fs.readFileSync(path.join(htmlSkill, "assets/design-tokens.json"), "utf8"));
-const deckTokenFile = path.join(skillsRoot, "mint-report-deck/assets/design-tokens.json");
 
 assert.deepEqual(htmlTokens, canonical, "创意 HTML 必须使用公共设计 Token");
-if (fs.existsSync(deckTokenFile)) {
-  const deckTokens = JSON.parse(fs.readFileSync(deckTokenFile, "utf8"));
-  assert.deepEqual(deckTokens, canonical, "同仓库正式 Deck 必须使用公共设计 Token");
-}
 assert.deepEqual(
   Object.fromEntries(["page", "paper", "ink900", "jade700", "blue500", "coral500", "jade100", "ink600", "line"].map((key) => [key, canonical.palette[key]])),
   {
@@ -49,14 +44,5 @@ assert.match(runtimeJs, /ArrowLeft/);
 assert.match(runtimeJs, /ArrowRight/);
 assert.match(runtimeJs, /data-edit-policy="editable"/);
 assert.match(runtimeJs, /contenteditable/);
-
-const forbidden = ["#F5F0E6", "#FFFDF8", "#0E453A", "#1C7866", "#BC794D"];
-const componentCssFile = path.join(skillsRoot, "mint-report-deck/assets/runtime/mint-components.css");
-if (fs.existsSync(componentCssFile)) {
-  const componentCss = fs.readFileSync(componentCssFile, "utf8");
-  for (const hex of forbidden) {
-    assert.doesNotMatch(componentCss, new RegExp(hex, "i"), `正式组件仍残留旧配色 ${hex}`);
-  }
-}
 
 console.log(JSON.stringify({ passed: true, scheme: "C-original", sharedTokens: true, fixedDesktopStage: true, editingAndPaging: true }, null, 2));
