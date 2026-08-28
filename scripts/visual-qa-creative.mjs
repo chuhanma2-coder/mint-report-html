@@ -43,15 +43,32 @@ for (const viewport of viewports) {
       return [...groups.entries()].sort((a,b)=>a[0]-b[0]).map((entry)=>entry[1].trim()).filter(Boolean);
     };
     const scenes = [...document.querySelectorAll(".mint-scene")].filter((scene) => !sceneFilter.length || sceneFilter.includes(scene.dataset.sceneId));
-    const uncoveredText = scenes.flatMap((scene) => {
+    const allowedReasons = new Set(["system-control", "page-number", "source-identity", "computed-value", "embedded-content", "decorative-label"]);
+    const textAudit = scenes.reduce((audit, scene) => {
       const walker = document.createTreeWalker(scene, NodeFilter.SHOW_TEXT);
-      const missing = [];
       while (walker.nextNode()) {
         const text = walker.currentNode.textContent.trim();
         const parent = walker.currentNode.parentElement;
-        if (text && parent && visible(parent) && !parent.closest('[data-edit-policy]')) missing.push(text.slice(0, 48));
+        if (!text || !parent || !visible(parent) || parent.closest('[aria-hidden="true"],[data-ui-control]')) continue;
+        audit.total += 1;
+        const contract = parent.closest('[data-edit-policy]');
+        if (!contract) { audit.uncovered.push(text.slice(0, 48)); continue; }
+        const policy = contract.dataset.editPolicy;
+        if (!contract.dataset.fieldPath || !contract.dataset.elementId || !contract.dataset.contentId || contract.dataset.qaRole !== "text") audit.invalidContracts.push(text.slice(0, 48));
+        if (policy === "editable") audit.editable += 1;
+        else if (["locked", "derived"].includes(policy) && allowedReasons.has(contract.dataset.editReason)) audit.restricted += 1;
+        else audit.invalidRestricted.push(text.slice(0, 48));
       }
-      return missing;
+      return audit;
+    }, { total: 0, editable: 0, restricted: 0, uncovered: [], invalidContracts: [], invalidRestricted: [] });
+    const blockSelector = "div,p,h1,h2,h3,h4,h5,h6,li,section,article,aside,header,footer,table,thead,tbody,tr,td,th";
+    const coarseEditable = [...document.querySelectorAll('[data-edit-policy="editable"]')].filter((node) => [...node.querySelectorAll(blockSelector)].some((child) => child !== node && child.innerText.trim() && !child.hasAttribute("data-edit-policy"))).map((node) => node.dataset.fieldPath || node.tagName);
+    const controls = [...document.querySelectorAll('.mint-nav,.mint-page-arrow,.mint-edit-toggle')].filter(visible);
+    const formalFields = [...document.querySelectorAll('.mint-scene [data-field-path]')].filter(visible);
+    const intersects = (a,b) => Math.min(a.right,b.right) > Math.max(a.left,b.left) && Math.min(a.bottom,b.bottom) > Math.max(a.top,b.top);
+    const controlCollisions = controls.flatMap((control) => {
+      const a = control.getBoundingClientRect();
+      return formalFields.filter((field) => intersects(a, field.getBoundingClientRect())).map((field) => ({ control: control.className, fieldPath: field.dataset.fieldPath }));
     });
     return {
       scenes: scenes.map((scene) => {
@@ -70,9 +87,12 @@ for (const viewport of viewports) {
       previousVisible: visible(document.querySelector("[data-scene-prev]")),
       nextVisible: visible(document.querySelector("[data-scene-next]")),
       editToggleVisible: visible(document.querySelector("[data-edit-toggle]")),
+      chromeToggleVisible: visible(document.querySelector("[data-chrome-toggle]")),
       requiredEditable: document.querySelectorAll('[data-edit-policy="editable"][data-field-path]').length,
       unexpectedEditable: document.querySelectorAll('[contenteditable="true"]:not([data-edit-policy="editable"])').length,
-      uncoveredText,
+      textAudit,
+      coarseEditable,
+      controlCollisions,
       bodyOverflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2
     };
   }, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
@@ -80,9 +100,15 @@ for (const viewport of viewports) {
   if (!state.navVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "导航不可见" });
   if (!state.previousVisible || !state.nextVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "左右翻页控件不可见" });
   if (!state.editToggleVisible) issues.push({ viewport: viewport.name, gate: "editability", message: "可见编辑入口不可用" });
+  if (!state.chromeToggleVisible) issues.push({ viewport: viewport.name, gate: "focus-mode", message: "可见清屏入口不可用" });
   if (!state.requiredEditable) issues.push({ viewport: viewport.name, gate: "editability", message: "没有带稳定字段路径的可编辑文字" });
   if (state.unexpectedEditable) issues.push({ viewport: viewport.name, gate: "editability", message: "存在合同外可编辑元素" });
-  if (state.uncoveredText.length) issues.push({ viewport: viewport.name, gate: "editability", message: `存在 ${state.uncoveredText.length} 个未声明编辑策略的正式文字节点`, samples: state.uncoveredText.slice(0, 5) });
+  if (state.textAudit.uncovered.length) issues.push({ viewport: viewport.name, gate: "editability", message: `存在 ${state.textAudit.uncovered.length} 个未声明编辑策略的正式文字节点`, samples: state.textAudit.uncovered.slice(0, 5) });
+  if (state.textAudit.invalidContracts.length) issues.push({ viewport: viewport.name, gate: "editability", message: "可见文字的字段、身份或几何合同不完整", samples: state.textAudit.invalidContracts.slice(0, 5) });
+  if (state.textAudit.invalidRestricted.length) issues.push({ viewport: viewport.name, gate: "editability", message: "存在没有合法原因的 locked/derived 文字", samples: state.textAudit.invalidRestricted.slice(0, 5) });
+  if (state.textAudit.total && state.textAudit.editable + state.textAudit.restricted !== state.textAudit.total) issues.push({ viewport: viewport.name, gate: "editability", message: `实际可见文字覆盖 ${state.textAudit.editable + state.textAudit.restricted}/${state.textAudit.total}，要求 100%` });
+  if (state.coarseEditable.length) issues.push({ viewport: viewport.name, gate: "editability", message: "存在用一个外层可编辑合同包住多个正式文字块的粗粒度字段", samples: state.coarseEditable.slice(0, 5) });
+  if (state.controlCollisions.length) issues.push({ viewport: viewport.name, gate: "control-safe-zone", message: `导航或编辑控件遮挡 ${state.controlCollisions.length} 个正式字段`, samples: state.controlCollisions.slice(0, 5) });
   for (const scene of state.scenes) {
     if (scene.overflowX) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "overflow", message: "场景横向溢出" });
     if (scene.empty || !scene.answerVisible) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "reading-start", message: "场景缺少明确阅读起点" });
@@ -109,6 +135,12 @@ for (const viewport of viewports) {
   await page.keyboard.press("e");
   const editingOff = await page.evaluate(() => ({ body: document.body.classList.contains("editing"), editable: document.querySelectorAll('[contenteditable="true"]').length }));
   if (editingOff.body || editingOff.editable) issues.push({ viewport: viewport.name, gate: "editability", message: "E 键未能退出编辑状态" });
+  await page.keyboard.press("h");
+  const chromeHidden = await page.evaluate(() => ({ hidden: document.body.classList.contains("mint-chrome-hidden"), nav: getComputedStyle(document.querySelector(".mint-nav")).display, restore: getComputedStyle(document.querySelector("[data-chrome-restore]")).display }));
+  if (!chromeHidden.hidden || chromeHidden.nav !== "none" || chromeHidden.restore === "none") issues.push({ viewport: viewport.name, gate: "focus-mode", message: "H 键未能清屏并保留恢复入口" });
+  await page.keyboard.press("Escape");
+  const chromeRestored = await page.evaluate(() => !document.body.classList.contains("mint-chrome-hidden") && getComputedStyle(document.querySelector(".mint-nav")).display !== "none");
+  if (!chromeRestored) issues.push({ viewport: viewport.name, gate: "focus-mode", message: "Esc 未能恢复演示控件" });
   await page.keyboard.press("ArrowRight");
   if (state.scenes.length > 1) {
     await page.waitForTimeout(500);
@@ -132,7 +164,7 @@ if (printState.hiddenDetails) issues.push({ gate: "print", message: "打印状�
 if (printState.visibleControls) issues.push({ gate: "print", message: "打印状态仍显示交互控件" });
 await printPage.close();
 await browser.close();
-const report = { schemaVersion: "0.9.3", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
+const report = { schemaVersion: "0.9.4", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ passed: report.passed, viewports: results.length, issues: issues.length, outputFile }, null, 2));
 process.exit(report.passed ? 0 : 1);

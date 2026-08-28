@@ -6,6 +6,8 @@
 - Visible previous/next controls remain available at the left and right edges in addition to scrolling. Left/Right, Up/Down, and Page Up/Down navigate to neighboring scenes when the user is not editing text.
 - Navigation exposes every scene title and current progress. The first/last previous/next control is visibly disabled instead of wrapping unexpectedly.
 - A visible edit control and the `E` shortcut are mandatory in every generated file. Both enter the same field-contract editing state; only `[data-edit-policy="editable"]` fields become editable. Editing is a default runtime capability, not an optional feature requested by prompt.
+- A visible `清屏 · H` control and the `H` shortcut hide navigation, arrows, and editing chrome without hiding report content. `Esc`, `H`, or the small restore control brings the chrome back. Keyboard scene navigation continues while chrome is hidden.
+- Runtime controls occupy a protected viewport safe zone. Browser QA must fail when navigation, arrows, the edit button, or the restore button intersects a formal `[data-field-path]` element.
 - Edit mode highlights only hovered or focused fields. It must not alter typography, color, geometry, or make navigation and locked/derived fields editable.
 - Motion must encode entrance, progression, comparison, change, or focus. Limit the report to three motion primitives.
 - Honor `prefers-reduced-motion`; no information may disappear when motion is disabled.

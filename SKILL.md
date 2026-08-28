@@ -23,9 +23,9 @@ Use `mint-report-deck` instead when the user explicitly requires PPTX, an exact 
 6. Build one scene per management question. On desktop and in PDF, compose the main scene on a fixed 1920×1080 `.mint-scene__stage` and scale the stage uniformly; on mobile, use a controlled same-content reflow that preserves field order and hierarchy. Use `scroll-snap: proximity`, not mandatory snapping.
 7. Keep every `mustShow` item visible without interaction. Put only supporting detail in expandable regions. In print mode, expand all required detail.
 8. Add stable `data-scene-id`, `data-atom-ref`, `data-field-path`, and `data-edit-policy` attributes. Every main title must also include `data-title-contract` and `data-title-role`. Never create unsupported facts to complete a composition.
-9. Every generated HTML must include the shared creative runtime. It must always provide visible previous/next controls, Left/Right and Up/Down keyboard navigation, a visible edit button, and the `E` shortcut. Every formal text field is editable unless its contract explicitly marks it `derived` or `locked`; this requirement does not depend on the user's prompt.
+9. Every generated HTML must include the shared creative runtime. It must always provide visible previous/next controls, Left/Right and Up/Down keyboard navigation, a visible edit button with `E`, and a visible clear-screen control with `H`/`Esc` restore. Every formal text field is editable unless its contract explicitly marks it `derived` or `locked` with an allowed `data-edit-reason`; this requirement does not depend on the user's prompt.
 10. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`.
-11. Use `review` for the first draft, `revision` for changed Scenes only, and `publish` only after `structureState=frozen`. Review checks desktop and produces `report-preview.pdf`; Publish checks all viewports and produces the formal `report.pdf`.
+11. Use `review` for the first draft, `revision` for changed Scenes only, and `publish` only after `structureState=frozen`. Review checks desktop and produces HTML only; add `--preview-pdf` only when requested. Publish checks all viewports and produces the formal `report.pdf`. If preparation proposes more than eight Scenes, confirm the management-question plan before visual authoring.
 12. Repair collisions or structure in the Scene source. One automatic geometry repair is allowed; a second failure becomes `needs-layout-review`. Never shrink text repeatedly or switch to an unrelated template.
 
 ## Repository is state
@@ -53,7 +53,7 @@ Do not default to cards, dashboards, or one visual component per scene. Fixed 16
 - Adjacent scenes do not mechanically repeat the same silhouette without a recorded reason.
 - Motion expresses entrance, progression, comparison, change, or focus; it is never decorative noise.
 - Navigation, keyboard movement, details, tabs, charts, media enlargement, and reduced-motion mode work when present.
-- Previous/next controls, Left/Right navigation, the visible edit control, and `E` editing are mandatory. Required editable-field coverage is 100%; navigation, page counters, derived values, and locked source identifiers are never accidentally editable.
+- Previous/next controls, Left/Right navigation, the visible edit control, `E` editing, and `H` clear-screen mode are mandatory. Coverage is calculated from every actually visible report text run, not from fields already declared editable. Ordinary visible text must be editable; `locked` or `derived` text requires an allowed reason. Coverage is 100%, coarse container-level edit contracts are forbidden, and runtime controls may not overlap formal fields.
 - Necessary information remains complete with motion disabled and in PDF.
 - A failed visual direction may be regenerated once. If it still fails, stop; never fall back to the old card template.
 

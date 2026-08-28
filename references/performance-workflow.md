@@ -39,16 +39,20 @@ Use `core/scripts/project-state.mjs` to change state. `publish` is legal only wh
 ## QA profiles
 
 ```bash
-node scripts/run-creative-workflow.mjs review <project-dir>
+node scripts/run-creative-workflow.mjs review <project-dir> [--preview-pdf]
 node scripts/run-creative-workflow.mjs revision <project-dir> [--preview-pdf]
 node scripts/run-creative-workflow.mjs publish <project-dir>
 ```
 
-- Review: all current Scenes at desktop; creates `report.html` and `report-preview.pdf`.
+- Review: all current Scenes at desktop; creates `report.html`. Add `--preview-pdf` only when the user actually needs a PDF preview.
 - Revision: affected Scenes at desktop; does not regenerate PDF unless requested.
 - Publish: all Scenes at desktop, laptop, mobile, print, interaction, and collision gates; creates formal PDF.
 
 A successful Publish also writes `delivery-manifest.json` and sets `project-state.deliveryStatus=formal-ready`. Review and Revision can never create that state.
+
+If preparation proposes more than eight Scenes, stop at `needs-confirmation` unless the user has confirmed the Scene plan. Set `scenePlanConfirmed: true` in the prepare options only after that confirmation. This prevents a long draft from receiving full visual treatment before its management questions and order are stable.
+
+Do not run custom screenshot-to-PDF loops or duplicate the workflow with ad hoc scripts. Review is the cheap structure/desktop pass, Revision checks affected Scenes only, and Publish is the single full-delivery pass.
 
 ## Context governance
 

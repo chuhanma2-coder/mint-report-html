@@ -134,6 +134,8 @@ const brief = {
 };
 for (const asset of normalization.manifest.assets.filter((item) => item.status === "needs-asset-review")) brief.blockingIssues.push(`素材 ${asset.sourcePath} 需要确认：${asset.warnings.join("；")}`);
 if (!scenes.length) brief.blockingIssues.push("标准化素材中没有可编译的文本；不得生成空报告");
+const sceneReviewThreshold = Number(options.sceneReviewThreshold ?? 8);
+if (scenes.length > sceneReviewThreshold && options.scenePlanConfirmed !== true) brief.blockingIssues.push(`候选 Scene 为 ${scenes.length} 个，超过 ${sceneReviewThreshold} 个；先确认管理问题与 Scene 目录，再进行视觉制作`);
 if (brief.blockingIssues.length && brief.status === "planned") brief.status = "needs-confirmation";
 
 const sceneByUnit = new Map();
@@ -186,7 +188,7 @@ projectState.rawDigest = sourceLock.rawDigest;
 projectState.affectedSceneIds = structuralChange || !priorState ? currentOrder : affectedSceneIds;
 write("project-state.json", projectState);
 fs.writeFileSync(path.join(output, "session-brief.md"), sessionBrief(projectState));
-write("build-manifest.json", { schemaVersion: "0.9.3", sourceSetHash: normalization.manifest.sourceSetHash, structureHash: projectState.structureHash, currentSceneOrder: currentOrder, affectedSceneIds: projectState.affectedSceneIds, assets: normalization.manifest.assets.map((asset) => ({ assetId: asset.assetId, sourceHash: asset.sourceHash, contentHash: asset.contentHash, cacheHit: asset.cacheHit })), outputs: { html: "pending", previewPdf: "pending", formalPdf: "pending" }, generatedAt: new Date().toISOString() });
+write("build-manifest.json", { schemaVersion: "0.9.4", sourceSetHash: normalization.manifest.sourceSetHash, structureHash: projectState.structureHash, currentSceneOrder: currentOrder, affectedSceneIds: projectState.affectedSceneIds, executionBudget: { sceneReviewThreshold, scenePlanConfirmed: options.scenePlanConfirmed === true, defaultReviewOutputs: ["html"], publishOutputs: ["html", "pdf"] }, assets: normalization.manifest.assets.map((asset) => ({ assetId: asset.assetId, sourceHash: asset.sourceHash, contentHash: asset.contentHash, cacheHit: asset.cacheHit })), outputs: { html: "pending", previewPdf: "not-requested", formalPdf: "pending" }, generatedAt: new Date().toISOString() });
 const sceneProject = syncSceneProject(output);
 console.log(JSON.stringify({ status: brief.status, structureState: projectState.structureState, qaProfile: projectState.qaProfile, scenes: scenes.length, sourceUnits: sourceLock.unitCount, assets: normalization.manifest.assets.length, cacheHits: normalization.manifest.metrics.cacheHits, createdSceneFiles: sceneProject.created.length, unaccounted: unaccounted.length, output }, null, 2));
 process.exit(brief.status === "repair-required" ? 1 : 0);

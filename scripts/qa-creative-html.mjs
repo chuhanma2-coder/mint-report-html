@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { auditTextFieldContracts } from "./html-field-contract.mjs";
 
 const htmlFile = path.resolve(process.argv[2] || "");
 const briefFile = path.resolve(process.argv[3] || "");
@@ -20,6 +21,8 @@ const fieldPaths = matches(/data-field-path=["']([^"']+)["']/gi).map((match) => 
 const editableTags = [...markup.matchAll(/<[^<>]+data-edit-policy=["']editable["'][^<>]*>/gi)].map((match) => match[0]);
 const titleTags = [...markup.matchAll(/<h[1-3]\b[^<>]*data-title-contract[^<>]*>/gi)].map((match) => match[0]);
 const formalTextTags = [...markup.matchAll(/<(?:h[1-6]|p|li|small|figcaption|th|td)\b[^<>]*>/gi)].map((match) => match[0]);
+const sceneMarkup = [...markup.matchAll(/<section\b[^>]*class=["'][^"']*\bmint-scene\b[^"']*["'][^>]*>[\s\S]*?<\/section>/gi)].map((match) => match[0]).join("\n");
+const fieldAudit = auditTextFieldContracts(sceneMarkup);
 const externalAssets = matches(/<(?:script|img|video|audio|source|link)\b[^>]*(?:src|href)=["']https?:\/\/[^"']+/gi).map((match) => match[0]);
 if (externalAssets.length) issues.push({ gate: "offline-first", message: `存在 ${externalAssets.length} 个外部首屏资源依赖` });
 if (new Set(sceneIds).size !== brief.scenes.length || brief.scenes.some((scene) => !sceneIds.includes(scene.id))) issues.push({ gate: "scene-contract", message: "HTML 场景 ID 与 creative-brief 不一致" });
@@ -31,9 +34,15 @@ if (!/id=["']mint-creative-data["']/.test(html)) issues.push({ gate: "edit-state
 if (fieldPaths.length !== new Set(fieldPaths).size) issues.push({ gate: "edit-state", message: "存在重复字段路径" });
 if (!editableTags.length) issues.push({ gate: "editability", message: "没有任何正式文字字段声明为可编辑" });
 if (editableTags.some((tag) => !/data-field-path=["'][^"']+["']/i.test(tag))) issues.push({ gate: "editability", message: "可编辑字段缺少稳定字段路径" });
+if (fieldAudit.uncovered.length) issues.push({ gate: "editability", message: `存在 ${fieldAudit.uncovered.length} 段未声明编辑策略的可见文字`, samples: fieldAudit.uncovered.slice(0, 5) });
+if (fieldAudit.invalidEditable.length) issues.push({ gate: "editability", message: "可编辑文字缺少稳定字段路径" });
+if (fieldAudit.invalidRestricted.length) issues.push({ gate: "editability", message: "locked/derived 文字缺少合法 data-edit-reason" });
+if (fieldAudit.invalidIdentity.length) issues.push({ gate: "stable-identity", message: "可见文字合同缺少稳定 element/content ID" });
+if (fieldAudit.invalidGeometry.length) issues.push({ gate: "geometry-contract", message: "可见文字合同缺少几何角色" });
+if (fieldAudit.coverage !== 1) issues.push({ gate: "editability", message: `可见文字合同覆盖率 ${(fieldAudit.coverage * 100).toFixed(1)}%，要求 100%` });
 if (formalTextTags.some((tag) => !/data-element-id=["'][^"']+["']/i.test(tag) || !/data-content-id=["'][^"']+["']/i.test(tag))) issues.push({ gate: "stable-identity", message: "正式文字缺少稳定 element/content ID" });
 if (formalTextTags.some((tag) => !/data-qa-role=["']text["']/i.test(tag) || !/data-qa-overlap=["'](?:forbid|allow-contained|allow-same-group)["']/i.test(tag))) issues.push({ gate: "geometry-contract", message: "正式文字缺少碰撞合同" });
-for (const control of ["data-scene-prev", "data-scene-next", "data-edit-toggle"]) if (!new RegExp(`\\b${control}\\b`, "i").test(html)) issues.push({ gate: "mandatory-controls", message: `缺少 ${control} 控件` });
+for (const control of ["data-scene-prev", "data-scene-next", "data-edit-toggle", "data-chrome-toggle"]) if (!new RegExp(`\\b${control}\\b`, "i").test(html)) issues.push({ gate: "mandatory-controls", message: `缺少 ${control} 控件` });
 if (!/class=["'][^"']*mint-scene__viewport/.test(markup) || !/class=["'][^"']*mint-scene__stage/.test(markup)) issues.push({ gate: "canvas-contract", message: "缺少固定桌面画布与受控移动布局容器" });
 if (titleTags.length !== brief.scenes.length) issues.push({ gate: "title-contract", message: "每个场景必须有且只有一个声明标题合同的主标题" });
 if (titleTags.some((tag) => !/data-title-role=["'](?:display|section|content|module)["']/i.test(tag))) issues.push({ gate: "title-contract", message: "标题缺少合法角色" });
@@ -41,9 +50,9 @@ if (/fallback|旧卡片模板|降级模板/i.test(html)) issues.push({ gate: "no
 const compositions = brief.scenes.map((scene) => scene.compositionIntent);
 for (let index = 1; index < compositions.length; index += 1) if (compositions[index] === compositions[index - 1] && !brief.scenes[index].repeatReason) issues.push({ gate: "visual-rhythm", sceneId: brief.scenes[index].id, message: "相邻场景机械重复且未说明原因" });
 const report = {
-  schemaVersion: "0.9.3",
+  schemaVersion: "0.9.4",
   passed: issues.length === 0,
-  gates: { scenes: sceneIds.length, requiredScenes: brief.scenes.length, mustShowAtoms: brief.scenes.flatMap((scene) => scene.mustShow).length, renderedAtomRefs: atomRefs.size, stableFieldPaths: fieldPaths.length, editableFields: editableTags.length, mandatoryControls: 3, externalAssets: externalAssets.length },
+  gates: { scenes: sceneIds.length, requiredScenes: brief.scenes.length, mustShowAtoms: brief.scenes.flatMap((scene) => scene.mustShow).length, renderedAtomRefs: atomRefs.size, stableFieldPaths: fieldPaths.length, editableFields: editableTags.length, visibleTextRuns: fieldAudit.total, editableTextRuns: fieldAudit.editable.length, intentionallyRestrictedTextRuns: fieldAudit.intentionalRestricted.length, editabilityCoverage: fieldAudit.coverage, mandatoryControls: 4, externalAssets: externalAssets.length },
   issues
 };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);

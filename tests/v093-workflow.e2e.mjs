@@ -23,7 +23,7 @@ let result = run([workflow, "prepare", source, project]); assert.equal(result.st
 for (const file of fs.readdirSync(path.join(project, "src", "scenes")).filter((name) => name.endsWith(".html"))) {
   const target = path.join(project, "src", "scenes", file); fs.writeFileSync(target, fs.readFileSync(target, "utf8").replace(' data-scene-status="placeholder"', ""));
 }
-const review = run([workflow, "review", project]); assert.equal(review.status, 0, review.stderr || review.stdout);
+const review = run([workflow, "review", project, "--preview-pdf"]); assert.equal(review.status, 0, review.stderr || review.stdout);
 assert.ok(fs.existsSync(path.join(project, "report-preview.pdf")));
 assert.equal(JSON.parse(fs.readFileSync(path.join(project, "project-state.json"), "utf8")).pdfState, "preview-current");
 for (const action of ["soft-freeze", "freeze"]) { result = run([stateScript, path.join(project, "project-state.json"), action]); assert.equal(result.status, 0, result.stderr || result.stdout); }

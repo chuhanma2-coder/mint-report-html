@@ -44,5 +44,9 @@ assert.match(runtimeJs, /ArrowLeft/);
 assert.match(runtimeJs, /ArrowRight/);
 assert.match(runtimeJs, /data-edit-policy="editable"/);
 assert.match(runtimeJs, /contenteditable/);
+assert.match(runtimeJs, /data-chrome-toggle/);
+assert.match(runtimeJs, /key===['"]h['"]/);
+assert.match(runtimeCss, /\.mint-chrome-hidden\s+\.mint-nav/);
+assert.match(runtimeCss, /\.mint-chrome-restore/);
 
 console.log(JSON.stringify({ passed: true, scheme: "C-original", sharedTokens: true, fixedDesktopStage: true, editingAndPaging: true }, null, 2));

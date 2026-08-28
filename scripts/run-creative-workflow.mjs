@@ -30,6 +30,7 @@ const affected = state.affectedSceneIds || [];
 const shaFile = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const profile = command === "publish" ? "publish" : command === "revision" ? "revision" : "review";
 if (profile === "publish" && state.structureState !== "frozen") { console.error("Publish blocked: structureState must be frozen"); process.exit(1); }
+if ((state.openIssues || []).length) { console.error(`Workflow blocked: resolve project-state.openIssues first (${state.openIssues.join("；")})`); process.exit(1); }
 try {
   run("validate-scene-project.mjs", [project], "scene-contract");
   run("assemble-creative-report.mjs", [project, report, ...(profile === "revision" && affected.length ? [`--scenes=${affected.join(",")}`] : [])], "assemble");
@@ -49,7 +50,7 @@ try {
     if (visualResult.stdout) process.stdout.write(visualResult.stdout);
     if (visualResult.status !== 0) throw new Error("needs-layout-review: geometry still fails after one repair");
   }
-  if (profile === "review" || profile === "publish" || process.argv.includes("--preview-pdf")) {
+  if (profile === "publish" || process.argv.includes("--preview-pdf")) {
     const pdf = path.join(project, profile === "publish" ? "report.pdf" : "report-preview.pdf");
     const manifest = path.join(project, profile === "publish" ? "export-manifest.json" : "preview-export-manifest.json");
     run("export-creative-pdf.mjs", [report, pdf, manifest, `--kind=${profile === "publish" ? "formal" : "preview"}`], "pdf-export");
@@ -64,7 +65,7 @@ try {
     current.updatedAt = new Date().toISOString();
     fs.writeFileSync(stateFile, `${JSON.stringify(current, null, 2)}\n`);
     const buildFile = path.join(project, "build-manifest.json");
-    const build = fs.existsSync(buildFile) ? JSON.parse(fs.readFileSync(buildFile, "utf8")) : { schemaVersion: "0.9.3", outputs: {} };
+    const build = fs.existsSync(buildFile) ? JSON.parse(fs.readFileSync(buildFile, "utf8")) : { schemaVersion: "0.9.4", outputs: {} };
     build.outputs = { ...build.outputs, html: { file: "report.html", hash: shaFile(report), state: "current" }, ...(profile === "publish" ? { formalPdf: { file: "report.pdf", hash: shaFile(pdf), state: "current" } } : { previewPdf: { file: "report-preview.pdf", hash: shaFile(pdf), state: "current" } }) };
     build.generatedAt = new Date().toISOString();
     fs.writeFileSync(buildFile, `${JSON.stringify(build, null, 2)}\n`);
@@ -73,7 +74,7 @@ try {
       const visualReport = JSON.parse(fs.readFileSync(visual, "utf8"));
       const staticReport = JSON.parse(fs.readFileSync(qa, "utf8"));
       const delivery = {
-        schemaVersion: "0.9.3",
+        schemaVersion: "0.9.4",
         status: "formal-ready",
         structureState: current.structureState,
         qaProfile: "publish",
@@ -90,9 +91,9 @@ try {
   } else {
     const stateFile = path.join(project, "project-state.json");
     const current = JSON.parse(fs.readFileSync(stateFile, "utf8"));
-    current.deliveryStatus = "revision-ready";
-    current.qaProfile = "revision";
-    current.lastCompletedAction = "revision-validated";
+    current.deliveryStatus = profile === "review" ? "review-ready" : "revision-ready";
+    current.qaProfile = profile;
+    current.lastCompletedAction = `${profile}-validated`;
     current.updatedAt = new Date().toISOString();
     fs.writeFileSync(stateFile, `${JSON.stringify(current, null, 2)}\n`);
   }

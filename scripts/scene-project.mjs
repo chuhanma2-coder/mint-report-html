@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { auditTextFieldContracts } from "./html-field-contract.mjs";
 
 const VERSION = "0.9.3";
 const e = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -40,6 +41,13 @@ export function validateSceneHtml(html, scene, atoms) {
     if (!/data-edit-policy=["'](?:editable|derived|locked)["']/.test(attrs)) errors.push(`${scene.id}: 正式文字 ${tag[1]} 缺少编辑合同`);
     if (!/data-qa-role=["']text["']/.test(attrs) || !/data-qa-overlap=["'](?:forbid|allow-contained|allow-same-group)["']/.test(attrs)) errors.push(`${scene.id}: 正式文字 ${tag[1]} 缺少碰撞合同`);
   }
+  const fieldAudit = auditTextFieldContracts(html);
+  if (fieldAudit.uncovered.length) errors.push(`${scene.id}: ${fieldAudit.uncovered.length} 段可见文字没有编辑合同（${fieldAudit.uncovered.slice(0, 3).map((run) => run.text).join(" / ")}）`);
+  if (fieldAudit.invalidEditable.length) errors.push(`${scene.id}: 可编辑文字缺少稳定 data-field-path`);
+  if (fieldAudit.invalidRestricted.length) errors.push(`${scene.id}: locked/derived 文字缺少合法 data-edit-reason`);
+  if (fieldAudit.invalidIdentity.length) errors.push(`${scene.id}: 可见文字合同缺少稳定 element/content ID`);
+  if (fieldAudit.invalidGeometry.length) errors.push(`${scene.id}: 可见文字合同缺少几何角色`);
+  if (fieldAudit.coverage !== 1) errors.push(`${scene.id}: 可见文字合同覆盖率不是 100%`);
   for (const atomRef of scene.mustShow || []) if (!new RegExp(`data-atom-ref=["'][^"']*${atomRef}`).test(html)) errors.push(`${scene.id}: mustShow ${atomRef} 未在 Scene 中出现`);
   const known = new Set(atoms.map((atom) => atom.id));
   for (const match of html.matchAll(/data-content-id=["']([^"']+)["']/g)) for (const ref of match[1].split(/\s+/)) if (ref.startsWith("A") && !known.has(ref)) errors.push(`${scene.id}: data-content-id 引用了未知 Atom ${ref}`);
