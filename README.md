@@ -19,6 +19,7 @@ https://github.com/chuhanma2-coder/mint-report-html
 直接把材料发给 Agent，例如：
 
 > 请使用 Mint Report HTML，把下面的笔记整理成一份动态汇报。只使用我提供的事实，先理解内容关系再设计页面；先给我 HTML 审阅，确认后再发布正式 PDF/HTML。
+
 注：撰写 Prompt 时请尽量明确具体需求。如需添加动画、内嵌文件或嵌入组件等，请务必在 Prompt 中清晰注明。。
 
 默认输出包括：
