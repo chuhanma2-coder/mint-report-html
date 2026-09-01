@@ -10,7 +10,7 @@ Baseline: standalone mint-report-html `43e3440`. Do not modify mint-report-deck 
 | 04 | Referenced-asset offline bundle, cache reuse, current-field PDF; export restores interaction state | DONE |
 | 05 | Candidate QA before promotion; last-good survives failure; only changed scenes revalidate on revision | DONE |
 | 06 | Minimal Skill entrypoint, optional reference, pinned upstream provenance | DONE |
-| 07 | Raw-input forward tests, browser/edit/PDF checks, timings, RC publication; manual visual review before stable | IN PROGRESS |
+| 07 | Raw-input forward tests, browser/edit/PDF checks, timings, RC publication; manual visual review before stable | DONE |
 
 Tests run per item. Evidence and limitations recorded here; JSON validation alone does not prove visual or semantic quality.
 
