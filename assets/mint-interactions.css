@@ -1,0 +1,10 @@
+/* No page geometry, font shrinking, opacity changes or continuous animation. */
+[data-module-id] .mint-node-focused { outline: 3px solid var(--mint-jade, #087C66); outline-offset: 4px; }
+[data-module-id] .mint-edge-focused { stroke: var(--mint-blue, #2F86A6); }
+.mint-interaction-controls { position:relative;z-index:2;display: flex; flex-wrap: wrap; align-items: center; gap: 10px;padding:10px 12px;border:1px solid var(--mint-line,#D4E2DD);border-radius:12px;background:color-mix(in srgb,var(--mint-paper,#FFF) 94%,transparent);font-size:18px;box-shadow:0 8px 24px color-mix(in srgb,var(--mint-ink,#18312A) 8%,transparent) }
+.mint-interaction-controls button, .mint-interaction-controls select { font: inherit; color: var(--mint-ink, #18312A); background: var(--mint-paper, #FFFFFF); border: 1px solid currentColor; border-radius: 6px; padding: 6px 10px; max-width: 100%; }
+.mint-interaction-controls [role="status"] { font-size: 0.85em; }
+[data-module-id] [data-node-id]{position:relative;z-index:1}svg[data-auto-route]{z-index:0;overflow:visible}
+body.exporting .mint-interaction-controls, body.mint-chrome-hidden .mint-interaction-controls { display: none; }
+@media print { .mint-interaction-controls { display: none; } [data-module-id] .mint-node-focused { outline: none; } }
+@media(max-width:720px){.mint-interaction-controls{font-size:15px}.mint-interaction-controls select{flex:1 1 100%}}

@@ -13,7 +13,7 @@ const abbreviations = JSON.parse(fs.readFileSync(path.join(root, "references/ent
 const arr = (value) => Array.isArray(value) ? value : [];
 const includesAny = (text, values) => arr(values).some((value) => text.includes(value));
 const startsAny = (text, values) => arr(values).some((value) => text.trim().startsWith(value));
-const clean = (text) => String(text || "").replace(/^[-*+]\s+/, "").replace(/^\(?\d+[）).、]\s*/, "").trim();
+const clean = (text) => String(text || "").replace(/^[-*+]\s+/, "").replace(/^(?:\(?\d+[）).、]|[一二三四五六七八九十]+、)\s*/, "").trim();
 const sourceId = (name) => String(name || "input").replace(/[^\p{L}\p{N}_.-]+/gu, "-");
 const digest = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
 
@@ -34,14 +34,16 @@ export function splitSource(rawText, sourceName) {
       listIndex = 0;
       return;
     }
-    const heading = line.match(/^(?:#{1,6}\s*|[一二三四五六七八九十]+、)(.+?)[：:]?$/);
+    // Chinese numbered sentences ending in normal prose punctuation are list
+    // items, not headings. Treating them as headings silently lost the source.
+    const heading = line.match(/^#{1,6}\s*(.+?)$/) || (!/[。！？；]$/.test(line) && line.match(/^[一二三四五六七八九十]+、(.+?)[：:]?$/));
     if (heading) {
       section = heading[1].trim();
       sectionId = `S${++sectionIndex}`;
       listIndex = 0;
       return;
     }
-    const isBullet = /^[-*+]\s+/.test(line) || /^\(?\d+[）).、]/.test(line);
+    const isBullet = /^[-*+]\s+/.test(line) || /^(?:\(?\d+[）).、]|[一二三四五六七八九十]+、)/.test(line);
     const normalized = clean(line);
     const segments = normalized
       .split(/(?<=[。！？；])\s*/u)
@@ -114,6 +116,12 @@ function relationHint(previous, current) {
   if (/(V2|现在|目前|当前)/i.test(text) && /(V1|过去|原来|此前)/i.test(previous.text)) return "before-after";
   if (startsAny(text, markers.dependency)) return "dependency";
   if (startsAny(text, markers.sequence)) return "sequence";
+  // Explicit progression may follow a repeated subject, not just start the sentence.
+  // Require matching subjects and increasing markers; arbitrary embedded words are not steps.
+  const ordinal = value => value.match(/^([^，。；：:]{1,24}?)(首先|其次|然后|随后|最后)(?=[\u3400-\u9fff])/);
+  const before = ordinal(previous.text), after = ordinal(text);
+  const order = { 首先: 0, 其次: 1, 然后: 2, 随后: 2, 最后: 3 };
+  if (before && after && before[1] === after[1] && order[after[2]] > order[before[2]]) return "sequence";
   if (startsAny(text, markers.effect) || /造成|导致|从而/.test(text)) return "causal";
   if (startsAny(text, markers.contrast)) return "comparison";
   if (/^(?:前台|中台|后台|原始层|明细层|汇总层|战略层|执行层)[：:]/.test(text) && /^(?:前台|中台|后台|原始层|明细层|汇总层|战略层|执行层)[：:]/.test(previous.text)) return "hierarchy";

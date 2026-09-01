@@ -13,7 +13,7 @@ const { chromium } = await import(moduleName.startsWith("/") ? pathToFileURL(mod
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type", "Access-Control-Expose-Headers": "X-Mint-Content-Hash" };
 const server = http.createServer(async (req, res) => { try {
   if (req.method === "OPTIONS") { res.writeHead(204, cors); return res.end(); }
-  if (req.url === "/api/health") { res.writeHead(200, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, service: "mint-creative-pdf", version: "0.9" })); }
+  if (req.url === "/api/health") { res.writeHead(200, { ...cors, "Content-Type": "application/json" }); return res.end(JSON.stringify({ ok: true, service: "mint-creative-pdf", version: "0.10.0-rc.1" })); }
   if (req.method === "POST" && req.url === "/api/export-pdf") {
     let body = "", size = 0; for await (const chunk of req) { size += chunk.length; if (size > 25 * 1024 * 1024) throw new Error("HTML 超过 25MB"); body += chunk; }
     const payload = JSON.parse(body || "{}"), html = String(payload.html || "");
@@ -22,6 +22,7 @@ const server = http.createServer(async (req, res) => { try {
     try {
       const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
       await page.setContent(html, { waitUntil: "load" }); await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(async () => { window.mintFields?.prepareExport(); await window.mintFields?.flush(); });
       await page.evaluate(() => {
         window.mintCreative?.setEditing(false); window.mintCreative?.closeModals();
         document.body.classList.remove("editing"); document.body.classList.add("exporting");
@@ -31,8 +32,8 @@ const server = http.createServer(async (req, res) => { try {
       await page.emulateMedia({ media: "print", reducedMotion: "reduce" });
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await page.waitForTimeout(80);
-      const state = await page.evaluate(() => ({ editable: document.querySelectorAll('[contenteditable="true"]').length, controls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-modal")].filter((node) => getComputedStyle(node).display !== "none").length, hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, model: document.querySelector("#mint-creative-data")?.textContent || "" }));
-      if (state.editable || state.controls || state.hiddenDetails || !state.model) throw new Error("当前编辑版本尚未进入可导出状态");
+      const state = await page.evaluate(() => ({ editable: document.querySelectorAll('[contenteditable="true"]').length, controls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-modal,.mint-interaction-controls")].filter((node) => getComputedStyle(node).display !== "none").length, hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, focusedGraph: document.querySelectorAll('.mint-node-focused,.mint-edge-focused').length, model: document.querySelector("#mint-creative-data")?.textContent || "" }));
+      if (state.editable || state.controls || state.hiddenDetails || state.focusedGraph || !state.model) throw new Error("当前编辑版本尚未进入可导出状态");
       await page.evaluate(() => document.querySelectorAll(".mint-details[hidden]").forEach((node) => { node.hidden = false; }));
       await page.emulateMedia({ media: "screen", reducedMotion: "reduce" });
       await page.evaluate(() => document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-modal").forEach((node) => node.style.setProperty("display", "none", "important")));
@@ -50,4 +51,4 @@ const server = http.createServer(async (req, res) => { try {
   if (req.method === "GET" && (req.url === "/" || req.url === "/report.html")) { res.writeHead(200, { "Content-Type": "text/html;charset=utf-8" }); return res.end(fs.readFileSync(input)); }
   res.writeHead(404, cors); res.end("not found");
 } catch (error) { res.writeHead(400, { ...cors, "Content-Type": "application/json" }); res.end(JSON.stringify({ ok: false, error: error.message })); } });
-server.listen(port, "127.0.0.1", () => console.log(`Mint creative report: http://127.0.0.1:${port}/report.html`));
+server.listen(port, "127.0.0.1", () => console.log(`Mint creative report: http://127.0.0.1:${server.address().port}/report.html`));

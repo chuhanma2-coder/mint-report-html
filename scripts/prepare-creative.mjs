@@ -50,10 +50,10 @@ const relationTypes = (page) => [...new Set([
 ].filter(Boolean))];
 const interactionFor = (page) => {
   const result = [];
-  if (page.proofObject?.dataShape === "numeric") result.push("数字口径或公式详情");
-  if (["paired-objects", "independent-items"].includes(page.proofObject?.dataShape)) result.push("对象聚焦或对比切换");
-  if (["milestones", "ordered-actions"].includes(page.proofObject?.dataShape)) result.push("阶段推进聚焦");
-  if (page.atomRefs.length > 4) result.push("支持细节展开");
+  if (page.proofObject?.dataShape === "numeric") result.push("查看关键数字的原始口径与已提供公式；不依靠点击隐藏结论");
+  if (["paired-objects", "independent-items"].includes(page.proofObject?.dataShape)) result.push("聚焦一个对象，查看其对应证据；并列对象不新增方向连线");
+  if (["milestones", "ordered-actions"].includes(page.proofObject?.dataShape)) result.push("按原文已明确的阶段顺序讲解当前重点，完整步骤默认可见");
+  if (page.atomRefs.length > 4) result.push("按需展开支持细节以核对来源，关键事实始终可见");
   return result;
 };
 const compositionFor = (page) => ({

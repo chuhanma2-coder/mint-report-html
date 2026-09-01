@@ -10,6 +10,16 @@ export function geometryAuditInPage(sceneFilter = []) {
     return { left: box.left - pad, right: box.right + pad, top: box.top - pad, bottom: box.bottom + pad, width: box.width + pad * 2, height: box.height + pad * 2 };
   };
   const intersects = (a, b, pad = 0) => a.left < b.right - pad && a.right > b.left + pad && a.top < b.bottom - pad && a.bottom > b.top + pad;
+  const segmentHits = (a, b, box, margin) => {
+    let lo = 0, hi = 1;
+    for (const [start, delta, min, max] of [[a.x, b.x-a.x, box.left-margin, box.right+margin], [a.y, b.y-a.y, box.top-margin, box.bottom+margin]]) {
+      if (Math.abs(delta) < 1e-9) { if (start < min || start > max) return false; continue; }
+      const t1 = (min-start)/delta, t2 = (max-start)/delta;
+      lo = Math.max(lo, Math.min(t1,t2)); hi = Math.min(hi, Math.max(t1,t2));
+      if (lo > hi) return false;
+    }
+    return true;
+  };
   const contains = (outer, inner, pad = 1) => outer.left <= inner.left + pad && outer.right >= inner.right - pad && outer.top <= inner.top + pad && outer.bottom >= inner.bottom - pad;
   const glyphRects = (node) => {
     const result = [], walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
@@ -31,6 +41,8 @@ export function geometryAuditInPage(sceneFilter = []) {
         const point = new DOMPoint(local.x, local.y).matrixTransform(matrix);
         points.push({ x: point.x, y: point.y });
       }
+      const last = node.getPointAtLength(length), end = new DOMPoint(last.x, last.y).matrixTransform(matrix);
+      points.push({ x: end.x, y: end.y });
       return points;
     }
     const box = node.getBoundingClientRect(), points = [];
@@ -54,22 +66,40 @@ export function geometryAuditInPage(sceneFilter = []) {
     for (let i = 0; i < elements.length; i += 1) for (let j = i + 1; j < elements.length; j += 1) {
       const left = elements[i], right = elements[j];
       if (left.node.contains(right.node) || right.node.contains(left.node)) continue;
-      if (!intersects(left.box, right.box, 1) || allowed(left.node, right.node, left.box, right.box)) continue;
       const text = left.role === "text" ? left : right.role === "text" ? right : null;
       const connector = left.role === "connector" ? left : right.role === "connector" ? right : null;
       if (text && connector) {
-        const collision = connector.points.find((point) => text.glyphs.some((box) => point.x >= box.left - 1 && point.x <= box.right + 1 && point.y >= box.top - 1 && point.y <= box.bottom + 1));
-        if (collision) issues.push({ type: "connector-text-collision", sceneId: scene.dataset.sceneId, textElementId: text.node.dataset.elementId || null, visualElementId: connector.node.dataset.elementId || null, point: collision, textBox: text.box, visualBox: connector.box });
+        const scale = scene.querySelector('.mint-scene__stage')?.getBoundingClientRect().width / 1920 || 1;
+        const margin = Math.max(2, Number(connector.node.dataset.qaClearance || 4) * scale);
+        const collision = connector.points.find((point, i) => i > 0 && text.glyphs.some(box => segmentHits(connector.points[i-1], point, box, margin)));
+        if (collision) issues.push({ code: "CONNECTOR_TEXT_CLEARANCE", type: "connector-text-collision", sceneId: scene.dataset.sceneId, textElementId: text.node.dataset.elementId || null, visualElementId: connector.node.dataset.elementId || null, point: collision, requiredClearance: margin, textBox: text.box, visualBox: connector.box, supportedFixes: ["move-connector-anchor", "increase-node-spacing"] });
         continue;
       }
+      if (!intersects(left.box, right.box, 1) || allowed(left.node, right.node, left.box, right.box)) continue;
       if (text || [left.role, right.role].some((role) => ["node", "media"].includes(role))) issues.push({ type: text ? "visual-text-collision" : "element-collision", sceneId: scene.dataset.sceneId, leftElementId: left.node.dataset.elementId || null, rightElementId: right.node.dataset.elementId || null, roles: [left.role, right.role], leftBox: left.box, rightBox: right.box, intersection: { width: Math.max(0, Math.min(left.box.right, right.box.right) - Math.max(left.box.left, right.box.left)), height: Math.max(0, Math.min(left.box.bottom, right.box.bottom) - Math.max(left.box.top, right.box.top)) } });
     }
     for (const text of elements.filter((item) => item.role === "text")) for (const glyph of text.glyphs) {
       const x = (glyph.left + glyph.right) / 2, y = (glyph.top + glyph.bottom) / 2;
-      const overlay = document.elementsFromPoint(x, y).find((node) => node !== text.node && !text.node.contains(node) && !node.contains(text.node) && node.closest?.("[data-qa-role]"));
+      const stack = document.elementsFromPoint(x, y), textIndex = stack.findIndex(node => node === text.node || text.node.contains(node));
+      const overlay = (textIndex < 0 ? stack : stack.slice(0, textIndex)).find((node) => node !== text.node && !text.node.contains(node) && !node.contains(text.node) && node.closest?.("[data-qa-role]"));
       if (!overlay) continue;
       const visual = overlay.closest("[data-qa-role]");
       if (visual?.dataset.qaRole !== "text" && !allowed(text.node, visual, text.box, rect(visual.getBoundingClientRect()))) issues.push({ type: "z-index-text-cover", sceneId: scene.dataset.sceneId, textElementId: text.node.dataset.elementId || null, visualElementId: visual.dataset.elementId || null, role: visual.dataset.qaRole });
+    }
+    for (const connector of elements.filter(item => item.role === 'connector' && item.node.hasAttribute('data-edge-id'))) {
+      const root = connector.node.closest('[data-module-id]');
+      if (!root) continue;
+      for (const [end, ref, side, neighbor] of [[connector.points[0], connector.node.dataset.edgeFrom, connector.node.dataset.fromSide, connector.points[1]], [connector.points.at(-1), connector.node.dataset.edgeTo, connector.node.dataset.toSide, connector.points.at(-2)]]) {
+        const node = [...root.querySelectorAll('[data-node-id]')].find(n => n.dataset.nodeId === ref), box = node?.getBoundingClientRect();
+        let correct = Boolean(box && end && neighbor && ['left','right','top','bottom'].includes(side));
+        if (correct) {
+          const distance = side === 'left' ? Math.abs(end.x-box.left) : side === 'right' ? Math.abs(end.x-box.right) : side === 'top' ? Math.abs(end.y-box.top) : Math.abs(end.y-box.bottom);
+          const along = ['left','right'].includes(side) ? end.y >= box.top-3 && end.y <= box.bottom+3 : end.x >= box.left-3 && end.x <= box.right+3;
+          const outward = side === 'left' ? neighbor.x <= end.x+1 : side === 'right' ? neighbor.x >= end.x-1 : side === 'top' ? neighbor.y <= end.y+1 : neighbor.y >= end.y-1;
+          correct = distance <= 4 && along && outward;
+        }
+        if (!correct) issues.push({ code: 'EDGE_PORT_MISMATCH', type: 'connector-port-mismatch', sceneId: scene.dataset.sceneId, visualElementId: connector.node.dataset.elementId, nodeId: ref, side, point: end, box: box ? rect(box) : null, supportedFixes: ['move-connector-anchor', 'spread-ports'] });
+      }
     }
   }
   return issues;

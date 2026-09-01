@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { geometryAuditInPage } from "./geometry-audit.mjs";
+import { interactionDomAuditInPage } from "./interaction-contract.mjs";
 
 const input = path.resolve(process.argv[2] || "");
 const outputFile = path.resolve(process.argv[3] || path.join(path.dirname(input || "."), "visual-qa.json"));
@@ -27,6 +28,7 @@ for (const viewport of viewports) {
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   await page.goto(pathToFileURL(input).href, { waitUntil: "load" });
   await page.evaluate(() => document.fonts.ready);
+  for (const message of await page.evaluate(interactionDomAuditInPage)) issues.push({ viewport: viewport.name, gate: 'interaction-contract', message });
   const geometryIssues = await page.evaluate(geometryAuditInPage, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
   for (const issue of geometryIssues) issues.push({ viewport: viewport.name, gate: "geometry-collision", ...issue });
   const state = await page.evaluate((sceneFilter) => {
@@ -63,12 +65,19 @@ for (const viewport of viewports) {
     }, { total: 0, editable: 0, restricted: 0, uncovered: [], invalidContracts: [], invalidRestricted: [] });
     const blockSelector = "div,p,h1,h2,h3,h4,h5,h6,li,section,article,aside,header,footer,table,thead,tbody,tr,td,th";
     const coarseEditable = [...document.querySelectorAll('[data-edit-policy="editable"]')].filter((node) => [...node.querySelectorAll(blockSelector)].some((child) => child !== node && child.innerText.trim() && !child.hasAttribute("data-edit-policy"))).map((node) => node.dataset.fieldPath || node.tagName);
-    const controls = [...document.querySelectorAll('.mint-nav,.mint-page-arrow,.mint-edit-toggle')].filter(visible);
+    const controls = [...document.querySelectorAll('.mint-nav,.mint-page-arrow,.mint-edit-toggle,.mint-interaction-controls')].filter(visible);
     const formalFields = [...document.querySelectorAll('.mint-scene [data-field-path]')].filter(visible);
     const intersects = (a,b) => Math.min(a.right,b.right) > Math.max(a.left,b.left) && Math.min(a.bottom,b.bottom) > Math.max(a.top,b.top);
     const controlCollisions = controls.flatMap((control) => {
       const a = control.getBoundingClientRect();
-      return formalFields.filter((field) => intersects(a, field.getBoundingClientRect())).map((field) => ({ control: control.className, fieldPath: field.dataset.fieldPath }));
+      return formalFields.filter((field) => {
+        const box = field.getBoundingClientRect(), scroller = field.closest('.mint-report-scenes');
+        if (scroller && getComputedStyle(scroller).overflowY === 'auto') {
+          const clip = scroller.getBoundingClientRect();
+          return intersects(a, { left: Math.max(box.left,clip.left), right: Math.min(box.right,clip.right), top: Math.max(box.top,clip.top), bottom: Math.min(box.bottom,clip.bottom) });
+        }
+        return intersects(a,box);
+      }).map((field) => ({ control: control.className, fieldPath: field.dataset.fieldPath }));
     });
     return {
       scenes: scenes.map((scene) => {
@@ -132,6 +141,8 @@ for (const viewport of viewports) {
   await page.keyboard.press("e");
   const editingOn = await page.evaluate(() => ({ body: document.body.classList.contains("editing"), editable: document.querySelectorAll('[data-edit-policy="editable"][contenteditable="true"]').length, unexpected: document.querySelectorAll('[contenteditable="true"]:not([data-edit-policy="editable"])').length }));
   if (!editingOn.body || editingOn.editable !== state.requiredEditable || editingOn.unexpected) issues.push({ viewport: viewport.name, gate: "editability", message: `E 键编辑覆盖异常：${editingOn.editable}/${state.requiredEditable}` });
+  const editGeometry = await page.evaluate(geometryAuditInPage, scenesArg);
+  for (const issue of editGeometry) issues.push({ viewport: viewport.name, mode: 'editing', gate: 'geometry-collision', ...issue });
   await page.keyboard.press("e");
   const editingOff = await page.evaluate(() => ({ body: document.body.classList.contains("editing"), editable: document.querySelectorAll('[contenteditable="true"]').length }));
   if (editingOff.body || editingOff.editable) issues.push({ viewport: viewport.name, gate: "editability", message: "E 键未能退出编辑状态" });
@@ -151,7 +162,9 @@ for (const viewport of viewports) {
     const returned = await page.evaluate(() => document.querySelector('[data-scene-target][aria-current="true"]') === document.querySelector('[data-scene-target]'));
     if (!returned) issues.push({ viewport: viewport.name, gate: "navigation", message: "上一页按钮未返回前一场景" });
   }
-  await page.screenshot({ path: path.join(shots, `${viewport.name}.png`), fullPage: true, animations: "disabled" });
+  if (profile === 'revision') {
+    for (const id of scenesArg) await page.locator(`section[data-scene-id="${id}"]`).screenshot({ path: path.join(shots, `${viewport.name}-${id}.png`), animations: 'disabled' });
+  } else await page.screenshot({ path: path.join(shots, `${viewport.name}.png`), fullPage: true, animations: "disabled" });
   results.push({ viewport, ...state, geometryIssues, runtimeErrors });
   for (const error of runtimeErrors) issues.push({ viewport: viewport.name, gate: "runtime", message: error });
   await page.close();
@@ -164,7 +177,7 @@ if (printState.hiddenDetails) issues.push({ gate: "print", message: "打印状�
 if (printState.visibleControls) issues.push({ gate: "print", message: "打印状态仍显示交互控件" });
 await printPage.close();
 await browser.close();
-const report = { schemaVersion: "0.9.4", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
+const report = { schemaVersion: "0.10.0-rc.1", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ passed: report.passed, viewports: results.length, issues: issues.length, outputFile }, null, 2));
 process.exit(report.passed ? 0 : 1);

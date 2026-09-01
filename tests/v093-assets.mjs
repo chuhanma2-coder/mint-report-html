@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 import { normalizeAssets } from "../scripts/normalize-assets.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const repo = path.resolve(here, "../../..");
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), "mint-v093-assets-"));
 const writeStoredZip = (target, entries) => {
   const locals = [], centrals = []; let offset = 0;
@@ -37,14 +36,27 @@ const xlsxResult = normalizeAssets(xlsx, out("xlsx"));
 assert.match(xlsxResult.combinedText, /120/);
 assert.equal(xlsxResult.manifest.assets[0].renderStrategy, "data-extract-html-redraw");
 
-const image = path.join(repo, "skills/mint-report-deck/assets/media/mint-waves.png");
+const image = path.join(temp, "source.png");
+fs.writeFileSync(image, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
 assert.equal(normalizeAssets(image, out("image")).manifest.assets[0].renderStrategy, "direct-asset");
 
-const pdf = path.join(repo, "outputs/v09-forward/report.pdf");
+const pdf = path.join(temp, "source.pdf");
+const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "<< /Type /Pages /Kids [3 0 R] /Count 1 >>", "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>", "<< /Length 0 >>\nstream\n\nendstream"];
+let pdfText = "%PDF-1.4\n", offsets = [0];
+objects.forEach((object, index) => { offsets.push(Buffer.byteLength(pdfText)); pdfText += `${index + 1} 0 obj\n${object}\nendobj\n`; });
+const xref = Buffer.byteLength(pdfText); pdfText += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.slice(1).map(offset => String(offset).padStart(10, "0") + " 00000 n \n").join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+fs.writeFileSync(pdf, pdfText);
 const pdfAsset = normalizeAssets(pdf, out("pdf")).manifest.assets[0];
 assert.ok(pdfAsset.normalizedFiles.some((file) => /pages\/page-/.test(file)), "PDF 必须缓存页面图");
 
-const pptx = path.join(repo, "skills/mint-report-deck/assets/presentation/Mint_Report_Component_Library.pptx");
+const pptx = path.join(temp, "source.pptx");
+writeStoredZip(pptx, {
+  "[Content_Types].xml": `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/><Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`,
+  "_rels/.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`,
+  "ppt/presentation.xml": `<?xml version="1.0"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`,
+  "ppt/_rels/presentation.xml.rels": `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`,
+  "ppt/slides/slide1.xml": `<?xml version="1.0"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>PPTX test</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>`
+});
 const pptOut = out("pptx");
 const pptFirst = normalizeAssets(pptx, pptOut).manifest.assets[0];
 const pptSecond = normalizeAssets(pptx, pptOut).manifest.assets[0];

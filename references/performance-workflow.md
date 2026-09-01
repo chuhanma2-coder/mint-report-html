@@ -50,6 +50,10 @@ node scripts/run-creative-workflow.mjs publish <project-dir>
 
 A successful Publish also writes `delivery-manifest.json` and sets `project-state.deliveryStatus=formal-ready`. Review and Revision can never create that state.
 
+All three profiles assemble into `.work/candidates/` first. Only a candidate that passes its profile's real checks may replace root artifacts; `build-manifest.json` is promoted last. Failure leaves the last-good report and build manifest untouched, writes `.work/last-attempt.json`, and marks current source state `repair-required`. Never inspect the old report as evidence for the rejected revision.
+
+Revision derives affected Scenes from Scene HTML/CSS, the Scene contract, referenced field values, art direction, asset bytes, and Skill implementation. Unchanged compiled fragments are reused. It records `compiledSceneIds`, `reusedSceneIds`, `normalizationRuns`, script/model-call counts, and elapsed time in `performance-report.json`. No-change revisions exit without revalidation.
+
 If preparation proposes more than eight Scenes, stop at `needs-confirmation` unless the user has confirmed the Scene plan. Set `scenePlanConfirmed: true` in the prepare options only after that confirmation. This prevents a long draft from receiving full visual treatment before its management questions and order are stable.
 
 Do not run custom screenshot-to-PDF loops or duplicate the workflow with ad hoc scripts. Review is the cheap structure/desktop pass, Revision checks affected Scenes only, and Publish is the single full-delivery pass.
@@ -64,5 +68,6 @@ On continuation, read `project-state.json` and `session-brief.md` first. Load on
 - Every selector begins with `[data-scene-id="<stable-scene-id>"]`.
 - Every formal element uses stable `data-element-id`, `data-content-id`, and `data-field-path` values that do not depend on page order.
 - Every geometry-relevant element declares `data-qa-role`, `data-qa-group` when needed, and `data-qa-overlap`.
+- Final HTML assets are enumerated from actual references and inlined; unreferenced files are not packaged. External, missing, outside-project, imported CSS, script, frame, or unsupported assets stop as `needs-asset-review` rather than remaining as hidden network dependencies.
 - Remove `data-scene-status="placeholder"` only after deliberately composing the Scene.
 - The assembly script produces the offline single HTML. Never patch the bundled report as the source.

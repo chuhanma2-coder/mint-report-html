@@ -6,7 +6,7 @@ const project = path.resolve(process.argv[2] || "creative-output");
 const reportFile = path.resolve(process.argv[3] || path.join(project, "visual-qa.json"));
 if (!fs.existsSync(reportFile)) { console.error("Usage: repair-geometry.mjs <project-dir> [visual-qa.json]"); process.exit(2); }
 const report = JSON.parse(fs.readFileSync(reportFile, "utf8"));
-const repairFile = path.join(project, "geometry-repair.json");
+const repairFile = process.argv[4] ? path.resolve(process.argv[4]) : path.join(project, "geometry-repair.json");
 if (fs.existsSync(repairFile)) { console.error("Automatic geometry repair already attempted for this revision"); process.exit(1); }
 const shift = (moving, fixed) => {
   const left = fixed.left - moving.right - 12, right = fixed.right - moving.left + 12;
@@ -16,6 +16,7 @@ const shift = (moving, fixed) => {
       : Math.abs(left) <= Math.abs(right) ? [left, 0] : [right, 0];
 };
 const changes = [];
+const changedElements = new Set();
 for (const issue of report.issues || []) {
   if (issue.gate !== "geometry-collision" || !issue.sceneId) continue;
   let elementId = issue.visualElementId, moving = issue.visualBox, fixed = issue.textBox;
@@ -24,8 +25,10 @@ for (const issue of report.issues || []) {
     const textIsLeft = issue.roles?.[0] === "text"; elementId = textIsLeft ? issue.rightElementId : issue.leftElementId; moving = textIsLeft ? issue.rightBox : issue.leftBox; fixed = textIsLeft ? issue.leftBox : issue.rightBox;
   }
   if (!elementId || !moving || !fixed) continue;
+  if (changedElements.has(`${issue.sceneId}/${elementId}`)) continue;
   const [x, y] = shift(moving, fixed);
   changes.push({ sceneId: issue.sceneId, elementId, x: Math.round(x), y: Math.round(y), reason: issue.type });
+  changedElements.add(`${issue.sceneId}/${elementId}`);
 }
 for (const change of changes) {
   const file = path.join(project, "src", "scenes", `${change.sceneId}.html`);

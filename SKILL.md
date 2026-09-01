@@ -24,7 +24,7 @@ Use `mint-report-deck` instead when the user explicitly requires PPTX, an exact 
 7. Keep every `mustShow` item visible without interaction. Put only supporting detail in expandable regions. In print mode, expand all required detail.
 8. Add stable `data-scene-id`, `data-atom-ref`, `data-field-path`, and `data-edit-policy` attributes. Every main title must also include `data-title-contract` and `data-title-role`. Never create unsupported facts to complete a composition.
 9. Every generated HTML must include the shared creative runtime. It must always provide visible previous/next controls, Left/Right and Up/Down keyboard navigation, a visible edit button with `E`, and a visible clear-screen control with `H`/`Esc` restore. Every formal text field is editable unless its contract explicitly marks it `derived` or `locked` with an allowed `data-edit-reason`; this requirement does not depend on the user's prompt.
-10. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`.
+10. Add only meaningful motion and interaction. Read `references/scrollytelling-contract.md`. Only when authored relationships need linked exploration, also read `references/relationship-interactions.md`; ordinary reports do not create or bundle an interaction module.
 11. Use `review` for the first draft, `revision` for changed Scenes only, and `publish` only after `structureState=frozen`. Review checks desktop and produces HTML only; add `--preview-pdf` only when requested. Publish checks all viewports and produces the formal `report.pdf`. If preparation proposes more than eight Scenes, confirm the management-question plan before visual authoring.
 12. Repair collisions or structure in the Scene source. One automatic geometry repair is allowed; a second failure becomes `needs-layout-review`. Never shrink text repeatedly or switch to an unrelated template.
 
@@ -53,8 +53,10 @@ Do not default to cards, dashboards, or one visual component per scene. Fixed 16
 - Adjacent scenes do not mechanically repeat the same silhouette without a recorded reason.
 - Motion expresses entrance, progression, comparison, change, or focus; it is never decorative noise.
 - Navigation, keyboard movement, details, tabs, charts, media enlargement, and reduced-motion mode work when present.
+- Optional relationship interactions use existing sourced fields and authored edges. Guides never create relationships; reachability never claims causality; parallel content never gains arrows. Custom HTML/SVG is equally supported and receives the same gates.
 - Previous/next controls, Left/Right navigation, the visible edit control, `E` editing, and `H` clear-screen mode are mandatory. Coverage is calculated from every actually visible report text run, not from fields already declared editable. Ordinary visible text must be editable; `locked` or `derived` text requires an allowed reason. Coverage is 100%, coarse container-level edit contracts are forbidden, and runtime controls may not overlap formal fields.
 - Necessary information remains complete with motion disabled and in PDF.
+- A candidate replaces the last-good report only after its applicable static, browser, interaction, geometry, and PDF gates pass. A failed candidate remains failed; the previous report is not evidence that the new revision passed.
 - A failed visual direction may be regenerated once. If it still fails, stop; never fall back to the old card template.
 
 ## Deliverables

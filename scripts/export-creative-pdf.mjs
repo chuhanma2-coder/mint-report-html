@@ -17,6 +17,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   await page.goto(pathToFileURL(input).href, { waitUntil: "load" });
   await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(async () => { window.mintFields?.prepareExport(); await window.mintFields?.flush(); });
   await page.evaluate(() => {
     window.mintCreative?.setEditing(false); window.mintCreative?.closeModals();
     document.body.classList.remove("editing"); document.body.classList.add("exporting");
@@ -26,8 +27,8 @@ try {
   await page.emulateMedia({ media: "print", reducedMotion: "reduce" });
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.waitForTimeout(80);
-  const state = await page.evaluate(() => ({ editable: document.querySelectorAll('[contenteditable="true"]').length, visibleControls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-modal")].filter((node) => getComputedStyle(node).display !== "none").length, hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, model: document.querySelector("#mint-creative-data")?.textContent || "" }));
-  if (state.editable || state.visibleControls || state.hiddenDetails || !state.model) throw new Error(`PDF 导出状态不完整：${JSON.stringify({ ...state, model: undefined })}`);
+  const state = await page.evaluate(() => ({ editable: document.querySelectorAll('[contenteditable="true"]').length, visibleControls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-modal,.mint-interaction-controls")].filter((node) => getComputedStyle(node).display !== "none").length, hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, focusedGraph: document.querySelectorAll('.mint-node-focused,.mint-edge-focused').length, model: document.querySelector("#mint-creative-data")?.textContent || "" }));
+  if (state.editable || state.visibleControls || state.hiddenDetails || state.focusedGraph || !state.model) throw new Error(`PDF 导出状态不完整：${JSON.stringify({ ...state, model: undefined })}`);
   fs.mkdirSync(path.dirname(pdfFile), { recursive: true });
   await page.evaluate(() => document.querySelectorAll(".mint-details[hidden]").forEach((node) => { node.hidden = false; }));
   await page.emulateMedia({ media: "screen", reducedMotion: "reduce" });
@@ -42,7 +43,7 @@ try {
   const original = fs.readFileSync(input, "utf8");
   const updated = original.replace(/<meta name="mint-pdf-state" content="[^"]*">/g, "").replace(/<meta name="mint-pdf-content-hash" content="[^"]*">/g, "").replace("</head>", `<meta name="mint-pdf-state" content="${kind === "formal" ? "available" : "preview"}"><meta name="mint-pdf-content-hash" content="${contentHash}"></head>`);
   fs.writeFileSync(input, updated);
-  const manifest = { schemaVersion: "0.9.3", status: "matched", kind, mode: "creative-scene-snapshot", htmlFile: path.basename(input), pdfFile: path.basename(pdfFile), contentHash, htmlHash: sha(updated), pdfHash: sha(fs.readFileSync(pdfFile)), sceneSnapshotHash: sha(sceneImages.join("")), sceneCount: sceneImages.length, generatedAt: new Date().toISOString(), exportState: { editable: state.editable, visibleControls: state.visibleControls, hiddenDetails: state.hiddenDetails } };
+  const manifest = { schemaVersion: "0.10.0-rc.1", status: "matched", kind, mode: "creative-scene-snapshot", htmlFile: path.basename(input), pdfFile: path.basename(pdfFile), contentHash, htmlHash: sha(updated), pdfHash: sha(fs.readFileSync(pdfFile)), sceneSnapshotHash: sha(sceneImages.join("")), sceneCount: sceneImages.length, generatedAt: new Date().toISOString(), exportState: { editable: state.editable, visibleControls: state.visibleControls, hiddenDetails: state.hiddenDetails } };
   fs.writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(JSON.stringify({ passed: true, pdfFile, manifestFile, contentHash }, null, 2));
 } finally { await browser.close(); }

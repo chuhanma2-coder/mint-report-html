@@ -31,7 +31,7 @@ if (!/scroll-snap-type\s*:\s*y\s+proximity/i.test(html)) issues.push({ gate: "sc
 if (!/prefers-reduced-motion/i.test(html)) issues.push({ gate: "motion-accessibility", message: "缺少 reduced-motion 支持" });
 if (!/@media\s+print/i.test(html) || !/\.mint-details\[hidden\][^{]*\{[^}]*display\s*:\s*block/is.test(html)) issues.push({ gate: "print-completeness", message: "打印状态未明确展开必要详情" });
 if (!/id=["']mint-creative-data["']/.test(html)) issues.push({ gate: "edit-state", message: "缺少嵌入式结构化创意模型" });
-if (fieldPaths.length !== new Set(fieldPaths).size) issues.push({ gate: "edit-state", message: "存在重复字段路径" });
+// Repeated views of one canonical field are legal; element IDs, not field paths, identify DOM objects.
 if (!editableTags.length) issues.push({ gate: "editability", message: "没有任何正式文字字段声明为可编辑" });
 if (editableTags.some((tag) => !/data-field-path=["'][^"']+["']/i.test(tag))) issues.push({ gate: "editability", message: "可编辑字段缺少稳定字段路径" });
 if (fieldAudit.uncovered.length) issues.push({ gate: "editability", message: `存在 ${fieldAudit.uncovered.length} 段未声明编辑策略的可见文字`, samples: fieldAudit.uncovered.slice(0, 5) });
@@ -50,7 +50,7 @@ if (/fallback|旧卡片模板|降级模板/i.test(html)) issues.push({ gate: "no
 const compositions = brief.scenes.map((scene) => scene.compositionIntent);
 for (let index = 1; index < compositions.length; index += 1) if (compositions[index] === compositions[index - 1] && !brief.scenes[index].repeatReason) issues.push({ gate: "visual-rhythm", sceneId: brief.scenes[index].id, message: "相邻场景机械重复且未说明原因" });
 const report = {
-  schemaVersion: "0.9.4",
+  schemaVersion: "0.10.0-rc.1",
   passed: issues.length === 0,
   gates: { scenes: sceneIds.length, requiredScenes: brief.scenes.length, mustShowAtoms: brief.scenes.flatMap((scene) => scene.mustShow).length, renderedAtomRefs: atomRefs.size, stableFieldPaths: fieldPaths.length, editableFields: editableTags.length, visibleTextRuns: fieldAudit.total, editableTextRuns: fieldAudit.editable.length, intentionallyRestrictedTextRuns: fieldAudit.intentionalRestricted.length, editabilityCoverage: fieldAudit.coverage, mandatoryControls: 4, externalAssets: externalAssets.length },
   issues

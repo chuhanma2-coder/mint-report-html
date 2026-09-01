@@ -1,0 +1,90 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync, spawn } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { geometryAuditInPage } from '../scripts/geometry-audit.mjs';
+import { interactionDomAuditInPage } from '../scripts/interaction-contract.mjs';
+import { sha } from '../scripts/scene-inputs.mjs';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const temp = fs.mkdtempSync(path.join(os.tmpdir(),'mint-v010-forward-')), project = path.join(temp,'project');
+const source = path.join(temp,'source.md');
+fs.writeFileSync(source,'# 下一阶段验证\n项目团队首先进行小额测试。\n项目团队其次扩大样本范围。\n项目团队最后根据结果决定推广。\n\n# 周报系统\n周报系统已覆盖140个贷款页面。\n周报系统已把分析范围从利率扩展到成本费用。\n');
+const run = (script,args=[]) => { const r=spawnSync(process.execPath,[path.join(root,'scripts',script),...args],{encoding:'utf8',env:process.env,maxBuffer:20_000_000}); assert.equal(r.status,0,r.stderr||r.stdout); return r; };
+run('prepare-creative.mjs',[source,project]);
+const read = name=>JSON.parse(fs.readFileSync(path.join(project,name),'utf8'));
+const brief=read('creative-brief.json'), map=read('content-map.json');
+const scene=brief.scenes.find(s=>s.mustShow.length===3); assert.ok(scene,'raw input must produce the three-step management question');
+const refs=scene.mustShow, atom=id=>map.contentAtoms.find(a=>a.id===id);
+scene.interactiveModules=[{id:'validation',type:'workflow',goal:'查看测试到推广的阶段衔接',nodes:refs.map((ref,i)=>({id:`node-${i}`,fieldPath:`atoms.${ref}`,sourceUnitRefs:atom(ref).sourceUnitRefs})),edges:[{id:'e01',from:'node-0',to:'node-1',relation:'sequence',directed:true,sourceUnitRefs:scene.sourceUnitRefs},{id:'e12',from:'node-1',to:'node-2',relation:'sequence',directed:true,sourceUnitRefs:scene.sourceUnitRefs}],guidedViews:[{nodeIds:['node-0']},{nodeIds:['node-1']},{nodeIds:['node-2']}]}];
+for(const s of brief.scenes) {
+  const file=path.join(project,'src/scenes',s.id+'.html');
+  fs.writeFileSync(file,fs.readFileSync(file,'utf8').replace(' data-scene-status="placeholder"',''));
+}
+fs.writeFileSync(path.join(project,'creative-brief.json'),JSON.stringify(brief));
+const htmlFile=path.join(project,'src/scenes',scene.id+'.html');
+let html=fs.readFileSync(htmlFile,'utf8');
+const paragraphs=[...html.matchAll(/<p\b[^>]*>[\s\S]*?<\/p>/g)].map(m=>m[0]);
+assert.equal(paragraphs.length,3);
+html=html.replace(paragraphs.join('\n'),'');
+const graph=`<div data-module-id="validation" class="graph"><div data-interaction-controls data-ui-control></div><div class="nodes">${paragraphs.map((p,i)=>`<div class="node" data-node-id="node-${i}" data-element-id="node-${i}" data-qa-role="node" data-qa-group="graph" data-qa-overlap="allow-same-group">${p}</div>`).join('')}</div><svg data-auto-route class="links" viewBox="0 0 1680 160" aria-hidden="true"><path d="M480 80 L600 80" stroke="var(--mint-jade)" fill="none" data-element-id="edge01" data-qa-role="connector" data-qa-group="graph" data-qa-overlap="allow-same-group" data-edge-id="e01" data-edge-from="node-0" data-edge-to="node-1" data-from-side="right" data-to-side="left"/><path d="M1080 80 L1200 80" stroke="var(--mint-jade)" fill="none" data-element-id="edge12" data-qa-role="connector" data-qa-group="graph" data-qa-overlap="allow-same-group" data-edge-id="e12" data-edge-from="node-1" data-edge-to="node-2" data-from-side="right" data-to-side="left"/></svg></div>`;
+html=html.replace('</h2>','</h2>'+graph);
+fs.writeFileSync(htmlFile,html);
+const scope=`[data-scene-id="${scene.id}"]`;
+fs.writeFileSync(path.join(project,'src/scenes',scene.id+'.css'),`${scope} .mint-scene__stage{display:grid;align-content:center;gap:60px}${scope} .graph{position:relative}${scope} .nodes{display:grid;grid-template-columns:repeat(3,480px);gap:120px;margin-top:80px}${scope} .node{height:160px;box-sizing:border-box;padding:24px;background:var(--mint-subtle);display:grid;align-content:center}${scope} .node p{font-size:32px;margin:0}${scope} .links{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}@media(max-width:720px){${scope} .nodes{display:flex;flex-direction:column;gap:44px}${scope} .node{width:100%;height:auto;min-height:140px}${scope} .node p{font-size:21px}}`);
+run('assemble-creative-report.mjs',[project]);
+run('qa-creative-html.mjs',[path.join(project,'report.html'),path.join(project,'creative-brief.json')]);
+const {chromium}=await import(process.env.MINT_PLAYWRIGHT_MODULE||'playwright');
+const browser=await chromium.launch({headless:true,executablePath:process.env.MINT_CHROMIUM_EXECUTABLE||undefined});
+let server;
+try {
+  const context=await browser.newContext({viewport:{width:1920,height:1080},reducedMotion:'reduce'});
+  await context.setOffline(true);
+  const page=await context.newPage(); const errors=[]; page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(pathToFileURL(path.join(project,'report.html')).href); await page.evaluate(()=>document.fonts.ready);
+  assert.deepEqual(await page.evaluate(interactionDomAuditInPage),[]);
+  const key=`${scene.id}/validation`;
+  assert.deepEqual((await page.evaluate(key=>window.mintInteractions.get(key).route('node-0','node-2'),key)).edgeIds,['e01','e12']);
+  assert.equal((await page.evaluate(key=>window.mintInteractions.get(key).route('node-2','node-0'),key)).message,'无已声明路径');
+  assert.deepEqual((await page.evaluate(key=>window.mintInteractions.get(key).reach('node-2','upstream'),key)).nodeIds.sort(),['node-0','node-1','node-2']);
+  assert.deepEqual((await page.evaluate(key=>window.mintInteractions.get(key).guide(1),key)).edgeIds,[]);
+  await page.getByRole('button',{name:'恢复全貌',exact:true}).click();
+  let geometry=await page.evaluate(geometryAuditInPage,[scene.id]); assert.deepEqual(geometry,[],JSON.stringify(geometry));
+  await page.keyboard.press('e');
+  const label=page.locator(`[data-node-id="node-0"] [data-field-path]`);
+  await label.fill('项目团队先验证成本。'); await page.evaluate(()=>window.mintFields.flush());
+  assert.equal(await page.locator('meta[name="mint-pdf-state"]').getAttribute('content'),'stale-after-html-edit');
+  assert.equal(await page.locator('[data-interaction-controls] select').first().locator('option').first().textContent(),'项目团队先验证成本。');
+  await page.evaluate(key=>window.mintInteractions.get(key).focus('node-1'),key);
+  const exportState=await page.evaluate(async()=>{ const snapshot=window.mintFields.prepareExport(); await window.mintFields.flush(); const clean={editing:document.querySelectorAll('[contenteditable="true"]').length,focus:document.querySelectorAll('.mint-node-focused').length}; window.mintFields.restoreExport(snapshot); return {...clean,restored:document.body.classList.contains('editing'),focusRestored:document.querySelectorAll('.mint-node-focused').length}; });
+  assert.deepEqual(exportState,{editing:0,focus:0,restored:true,focusRestored:1});
+  await page.evaluate(()=>{window.mintCreative.setEditing(false);window.mintInteractions.reset();});
+  await label.evaluate(n=>n.blur()); await page.keyboard.press('h'); assert.ok(await page.locator('body').evaluate(n=>n.classList.contains('mint-chrome-hidden'))); await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowLeft');
+  const edited=path.join(project,'edited.html'); fs.writeFileSync(edited,await page.content());
+  run('export-creative-pdf.mjs',[edited,path.join(project,'edited.pdf'),path.join(project,'edited-export.json')]);
+  const modelText=await page.locator('#mint-creative-data').textContent(); assert.equal(read('edited-export.json').contentHash,sha(modelText));
+  assert.equal(fs.readFileSync(path.join(project,'edited.pdf')).subarray(0,4).toString(),'%PDF');
+  for(const size of [{width:1920,height:1080},{width:1280,height:720},{width:390,height:844}]) { await page.setViewportSize(size); await page.evaluate(()=>document.fonts.ready); await page.screenshot({path:path.join(temp,`${size.width}.png`),fullPage:true}); }
+  assert.deepEqual(errors,[]);
+  // A deliberate connector crossing text must fail, even with same-group permission.
+  await page.setViewportSize({width:1920,height:1080});
+  await page.locator('[data-edge-id="e01"]').evaluate(n=>{ const b=document.querySelector('[data-node-id="node-0"] [data-field-path]').getBoundingClientRect(),m=n.getScreenCTM().inverse(),a=new DOMPoint(b.left,b.top+b.height/2).matrixTransform(m),z=new DOMPoint(b.right,b.top+b.height/2).matrixTransform(m);n.setAttribute('d',`M${a.x} ${a.y} L${z.x} ${z.y}`); });
+  assert.ok((await page.evaluate(geometryAuditInPage,[scene.id])).some(i=>i.type==='connector-text-collision'));
+  // Actual local HTTP service: one click returns a PDF for the current edited model.
+  server=spawn(process.execPath,[path.join(root,'scripts/serve-creative-report.mjs'),path.join(project,'report.html')],{env:{...process.env,MINT_REPORT_PORT:'0'},stdio:['ignore','pipe','pipe']});
+  const url=await new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(new Error('PDF server startup timeout')),15000);server.stdout.on('data',d=>{const m=d.toString().match(/http:\/\/127\.0\.0\.1:\d+\/report.html/);if(m){clearTimeout(timeout);resolve(m[0]);}});server.on('error',reject);});
+  await context.setOffline(false); await page.goto(url); await page.keyboard.press('e');
+  await page.locator('[data-node-id="node-0"] [data-field-path]').fill('项目团队先验证成本。'); await page.evaluate(()=>window.mintFields.flush());
+  await page.evaluate(key=>window.mintInteractions.get(key).focus('node-1'),key);
+  const download=page.waitForEvent('download',{timeout:60000});
+  await page.locator('[data-export-pdf]').click();
+  await (await download).saveAs(path.join(project,'one-click.pdf'));
+  assert.equal(await page.locator('meta[name="mint-pdf-state"]').getAttribute('content'),'available');
+  assert.ok(await page.locator('body').evaluate(n=>n.classList.contains('editing')));
+  assert.equal(await page.locator('.mint-node-focused').count(),1);
+  assert.equal(fs.readFileSync(path.join(project,'one-click.pdf')).subarray(0,4).toString(),'%PDF');
+  console.log(JSON.stringify({passed:true,project,screenshots:temp,sourceUnits:map.sourceUnits.length,offline:true,editedPdf:true,graphInteractions:true}));
+} finally { server?.kill(); await browser.close(); }

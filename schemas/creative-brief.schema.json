@@ -38,7 +38,8 @@
           "expandableDetails": { "type": "array", "items": { "type": "string" } },
           "risksAndBoundaries": { "type": "array", "items": { "type": "string" } },
           "interactionOpportunities": { "type": "array", "items": { "type": "string" } },
-          "compositionIntent": { "type": "string", "minLength": 1 }
+          "compositionIntent": { "type": "string", "minLength": 1 },
+          "interactiveModules": { "type": "array", "items": { "$ref": "interactive-module.schema.json" } }
         }
       }
     },
