@@ -46,7 +46,7 @@ function classifyGroup(group, graph) {
   return { primaryRelation, pageRole };
 }
 
-function clusterSource(map, previousClusters = []) {
+function clusterSource(map, previousClusters = [], maxUnits = 1400) {
   const sourceById = new Map(arr(map.sourceUnits).map((item) => [item.id, item]));
   const discourse = arr(map.discourseUnits);
   const edgeByPair = new Map(arr(map.semanticGraph?.edges).map((edge) => {
@@ -54,8 +54,16 @@ function clusterSource(map, previousClusters = []) {
     return [ids.join("|"), edge];
   }));
   const parent = discourse.map((_, index) => index);
+  const clusterUnits = discourse.map((item) => units(item.text));
   const find = (index) => parent[index] === index ? index : (parent[index] = find(parent[index]));
-  const join = (a, b) => { const x = find(a), y = find(b); if (x !== y) parent[y] = x; };
+  const join = (a, b) => {
+    const x = find(a), y = find(b);
+    if (x === y) return true;
+    if (clusterUnits[x] + clusterUnits[y] > maxUnits) return false;
+    parent[y] = x;
+    clusterUnits[x] += clusterUnits[y];
+    return true;
+  };
   const pairScore = (left, right, leftIndex, rightIndex) => {
     const reasons = [];
     let score = 0;
@@ -77,9 +85,9 @@ function clusterSource(map, previousClusters = []) {
   for (let leftIndex = 0; leftIndex < discourse.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < discourse.length; rightIndex += 1) {
       const result = pairScore(discourse[leftIndex], discourse[rightIndex], leftIndex, rightIndex);
-      const decision = result.score >= 4 ? "merge" : result.score <= 0 ? "split" : "review";
+      let decision = result.score >= 4 ? "merge" : result.score <= 0 ? "split" : "review";
+      if (decision === "merge" && !join(leftIndex, rightIndex)) decision = "split-capacity";
       decisions.push({ sourceUnitRefs: [discourse[leftIndex].id, discourse[rightIndex].id], score: result.score, decision, reasons: result.reasons });
-      if (decision === "merge") join(leftIndex, rightIndex);
     }
   }
   const grouped = new Map();
@@ -106,16 +114,53 @@ function clusterSource(map, previousClusters = []) {
   return { groups, decisions };
 }
 
-function managementQuestion(role) {
+function consolidatePages(groups, maxUnits) {
+  const output = [];
+  const sizeOf = (group) => units(group.units.map((unit) => unit.text).join(""));
+  const subjectsOf = (group) => new Set(group.units.map((unit) => unit.subject).filter((value) => value && value !== "待确认"));
+  const rolesOf = (group) => new Set(group.units.map((unit) => unit.role).filter(Boolean));
+  const isSupportGroup = (group) => [...rolesOf(group)].every((role) => ["evidence", "boundary", "risk", "action", "detail"].includes(role));
+  for (const group of groups) {
+    const previous = output.at(-1);
+    if (!previous) { output.push(group); continue; }
+    const combined = sizeOf(previous) + sizeOf(group);
+    const sameSection = previous.sectionId === group.sectionId;
+    const leftSubjects = subjectsOf(previous), rightSubjects = subjectsOf(group);
+    const sharedSubject = [...leftSubjects].some((subject) => rightSubjects.has(subject));
+    const distinctPrimaryClaims = rolesOf(previous).has("claim") && rolesOf(group).has("claim") && !sharedSubject;
+    const lightweightSupport = Math.min(sizeOf(previous), sizeOf(group)) <= maxUnits * .34 && (isSupportGroup(previous) || isSupportGroup(group));
+    const withinCapacity = combined <= maxUnits;
+    if (!sameSection || !withinCapacity || distinctPrimaryClaims || (!sharedSubject && !lightweightSupport)) {
+      output.push(group);
+      continue;
+    }
+    const mergedUnits = [...previous.units, ...group.units];
+    const refs = mergedUnits.map((unit) => unit.id);
+    const clusterId = `MC-${digest([...refs].sort().join("|")).slice(0, 12)}`;
+    output[output.length - 1] = {
+      ...previous,
+      key: clusterId,
+      clusterId,
+      units: mergedUnits,
+      sourceUnitRefs: refs,
+      mergeReasons: [...new Set([...previous.mergeReasons, ...group.mergeReasons, "page-consolidation:same-management-story"])],
+      confidence: Math.min(previous.confidence, group.confidence)
+    };
+  }
+  return output;
+}
+
+function managementQuestion(role, group) {
+  if (group?.section && group.section !== "材料") return `关于“${group.section}”，管理层需要形成什么判断？`;
   return ({ risk: "当前最需要管理层关注什么风险？", action: "下一步要推动什么？", contrast: "相比原方案发生了什么变化？", evidence: "哪些事实和数字说明当前进展？", claim: "这一部分最重要的结论是什么？" })[role] || "这一页需要回答什么？";
 }
 
 export function planDeck(task, map, { previousClusters = [] } = {}) {
   const started = performance.now();
   const blockingIssues = [], capacityConflicts = [];
-  const clustering = clusterSource(map, previousClusters);
-  const groups = clustering.groups;
   const maxUnits = task.readingMode === "reading" ? 1800 : task.readingMode === "presentation" ? 1000 : 1400;
+  const clustering = clusterSource(map, previousClusters, maxUnits);
+  const groups = consolidatePages(clustering.groups, maxUnits);
   const requested = task.pageContract?.requested;
   if (task.pageContract?.constraint === "exact" && requested && requested !== groups.length) blockingIssues.push(`创意 HTML 不按指定页数机械切分；当前识别 ${groups.length} 个管理问题。如需精确 ${requested} 页，请使用 mint-report-deck。`);
   for (const group of groups) {
@@ -161,7 +206,7 @@ export function planDeck(task, map, { previousClusters = [] } = {}) {
       sectionTitle: group.section,
       actionTitle: titleLines.join(""),
       titleLines,
-      pageQuestion: managementQuestion(pageRole),
+      pageQuestion: managementQuestion(pageRole, group),
       pageAnswer: answer,
       pageRole,
       proofObject: {
@@ -181,8 +226,9 @@ export function planDeck(task, map, { previousClusters = [] } = {}) {
       contentOrder: ["title", "page-answer", "proof-object", ...(pageRole === "action" ? ["action"] : [])],
       focalAnchor: "proof-object",
       densityProfile: units(group.units.map((unit) => unit.text).join("")) > maxUnits * 0.72 ? "compact" : group.units.length <= 2 ? "focused" : "balanced",
+      consolidationContract: { defaultMode: "management-report", moduleRange: [3, 6], lightweightUnitRange: [8, 15], maxBlankBandRatio: group.units.length <= 2 ? 0.55 : 0.4, mayAddSceneWithoutReplan: false },
       transitionFromPrevious: index === 0 ? null : { fromPageId: groups[index - 1].clusterId, bridge: `从${groups[index - 1].section}进入${group.section}` },
-      pageNecessity: { type: index === 0 ? "opening" : "independent-decision", reason: `回答独立管理问题 ${managementQuestion(pageRole)}`, removalTest: { losesPrimaryEvidence: true, breaksDecisionChain: pageRole === "action", exceedsCapacityElsewhere: false } },
+      pageNecessity: { type: index === 0 ? "opening" : groups[index - 1].sectionId === group.sectionId ? "capacity-continuation" : "independent-decision", reason: groups[index - 1]?.sectionId === group.sectionId ? "同一管理故事超过单页可读容量，保留连续页" : `回答独立管理问题 ${managementQuestion(pageRole, group)}`, removalTest: { losesPrimaryEvidence: true, breaksDecisionChain: pageRole === "action", exceedsCapacityElsewhere: groups[index - 1]?.sectionId === group.sectionId } },
       clusterContract: { clusterId: group.clusterId, sourceUnitRefs: group.sourceUnitRefs, mergeReasons: group.mergeReasons, confidence: group.confidence }
     };
   });
@@ -206,7 +252,7 @@ export function planDeck(task, map, { previousClusters = [] } = {}) {
     status: capacityConflicts.length ? "needs-confirmation" : blockingIssues.length ? "repair-required" : map.status === "needs-confirmation" || task.status === "needs-confirmation" ? "needs-confirmation" : "planned",
     communicationJob: map.communicationJob,
     narrativeSpine: pageContracts.map((page) => page.pageRole),
-    pageBudget: { requested: requested ?? null, minimum: 1, planned: pageContracts.length, constraint: task.pageContract?.constraint || "minimum-needed", overflowPolicy: task.pageContract?.overflowPolicy || "recompose", reason: pageContracts.length > 1 ? "不同页面分别回答独立管理问题，并由页面必要性合同约束" : "单页即可承接当前命题" },
+    pageBudget: { requested: requested ?? null, minimum: 1, planned: pageContracts.length, constraint: task.pageContract?.constraint || "minimum-needed", overflowPolicy: task.pageContract?.overflowPolicy || "recompose", reason: pageContracts.length > 1 ? "已先合并同一管理故事；仅独立决策或容量冲突保留分页" : "单页即可承接当前命题" },
     sectionIntroFamily: "mint-section-intro-v07",
     sections: [...sectionMap.values()],
     pageContracts,

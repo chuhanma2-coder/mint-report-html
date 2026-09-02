@@ -5,6 +5,7 @@
     let printOnly = false;
     button.addEventListener('click', async () => {
       if (printOnly) { window.print(); return; }
+      if (location.protocol === 'file:') { window.print(); return; }
       const snapshot = window.mintFields.prepareExport();
       button.disabled = true;
       try {
@@ -26,6 +27,7 @@
       } catch {
         printOnly = true; button.textContent = '打印 / 导出 PDF';
         button.title = '本地PDF服务未启动；点击打开打印窗口，再选择存储为PDF。';
+        window.print();
       } finally { button.disabled = false; window.mintFields.restoreExport(snapshot); }
     });
   }

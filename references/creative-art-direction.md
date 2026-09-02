@@ -22,6 +22,8 @@ Before rendering, describe the visual mood in one sentence, select at most three
 
 Visual variety must come from the management task, not random decoration. Brand consistency comes from typography, color semantics, spacing discipline, source treatment, and motion language—not identical geometry.
 
+Management-report Scenes default to balanced or compact density. A content title must not consume space needed by three to six related modules; use a verified integrated composition and the smallest legal title role that matches the hierarchy. Avoid fixed-height cards and panels whose contents occupy only their top edge. Use whitespace to separate levels, not to turn one supporting point into one page.
+
 ## Chinese title contract
 
 - Choose `display`, `section`, `content`, or `module` before choosing a size. Each role has a legal range in the shared Token file; there is no global title size.

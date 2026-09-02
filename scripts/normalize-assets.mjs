@@ -61,6 +61,55 @@ function readZipEntries(file) {
   return entries;
 }
 
+const xmlValue = value => String(value || "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim();
+const firstBlock = (xml, expression) => xml.match(expression)?.[0] || "";
+const pointValues = block => [...block.matchAll(/<c:pt\b[^>]*\bidx="(\d+)"[^>]*>[\s\S]*?<c:v>([\s\S]*?)<\/c:v>[\s\S]*?<\/c:pt>/g)]
+  .sort((a, b) => Number(a[1]) - Number(b[1])).map(match => xmlValue(match[2]));
+
+function extractPptxCharts(entries, cacheDir) {
+  const slideByChart = new Map();
+  for (const [name, bytes] of entries) {
+    const match = name.match(/^ppt\/slides\/_rels\/slide(\d+)\.xml\.rels$/);
+    if (!match) continue;
+    for (const relationship of bytes.toString("utf8").match(/<Relationship\b[^>]*>/g) || []) {
+      const target = relationship.match(/\bTarget="([^"]+)"/)?.[1];
+      if (!target || !/charts\/chart\d+\.xml$/.test(target)) continue;
+      const chartPath = path.posix.normalize(path.posix.join("ppt/slides", target));
+      const slides = slideByChart.get(chartPath) || [];
+      slides.push(Number(match[1])); slideByChart.set(chartPath, slides);
+    }
+  }
+  const charts = [];
+  for (const [name, bytes] of [...entries].filter(([part]) => /^ppt\/charts\/chart\d+\.xml$/.test(part)).sort((a, b) => a[0].localeCompare(b[0]))) {
+    const xml = bytes.toString("utf8"), rawType = xml.match(/<c:(barChart|lineChart|pieChart|doughnutChart|areaChart|scatterChart|radarChart|bubbleChart)\b/)?.[1] || "unknown";
+    const barDir = xml.match(/<c:barDir\b[^>]*\bval="([^"]+)"/)?.[1];
+    const type = rawType === "barChart" ? (barDir === "bar" ? "bar-horizontal" : "column") : rawType.replace(/Chart$/, "");
+    const titleBlock = firstBlock(xml, /<c:title\b[\s\S]*?<\/c:title>/), title = [...titleBlock.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(match => xmlValue(match[1])).join("");
+    const series = [];
+    for (const seriesBlock of xml.match(/<c:ser\b[\s\S]*?<\/c:ser>/g) || []) {
+      const tx = firstBlock(seriesBlock, /<c:tx\b[\s\S]*?<\/c:tx>/), seriesName = xmlValue(tx.match(/<(?:c:v|a:t)>([\s\S]*?)<\/(?:c:v|a:t)>/)?.[1] || `系列${series.length + 1}`);
+      const categoryBlock = firstBlock(seriesBlock, /<c:(?:cat|xVal)\b[\s\S]*?<\/c:(?:cat|xVal)>/);
+      const valueBlock = firstBlock(seriesBlock, /<c:(?:val|yVal)\b[\s\S]*?<\/c:(?:val|yVal)>/);
+      const categories = pointValues(categoryBlock), rawValues = pointValues(valueBlock), values = rawValues.map(value => Number.isFinite(Number(value)) ? Number(value) : value);
+      if (categories.length || values.length) series.push({ name: seriesName, categories, values });
+    }
+    const categories = series.find(item => item.categories.length)?.categories || [];
+    const formatCode = xmlValue(xml.match(/<c:formatCode>([\s\S]*?)<\/c:formatCode>/)?.[1] || "");
+    charts.push({ id: path.basename(name, ".xml"), part: name, slides: slideByChart.get(name) || [], type, title, formatCode, categories, series: series.map(({ name: seriesName, values }) => ({ name: seriesName, values })), hasCachedData: series.some(item => item.values.length > 0) });
+  }
+  if (!charts.length) return { charts, normalizedFiles: [], text: "", warnings: [] };
+  const target = path.join(cacheDir, "charts.json");
+  fs.writeFileSync(target, `${JSON.stringify({ schemaVersion: "0.11.0", charts }, null, 2)}\n`);
+  const text = charts.map(chart => {
+    const heading = `### 图表 ${chart.id}${chart.slides.length ? `（第 ${chart.slides.join("、")} 页）` : ""}: ${chart.title || "未命名图表"}`;
+    const header = ["系列/分类", ...chart.categories].join("\t");
+    const rows = chart.series.map(item => [item.name, ...item.values].join("\t"));
+    return [heading, `类型: ${chart.type}${chart.formatCode ? `；数字格式: ${chart.formatCode}` : ""}`, header, ...rows].filter(Boolean).join("\n");
+  }).join("\n\n");
+  const warnings = charts.filter(chart => !chart.hasCachedData).map(chart => `${chart.id} 没有可读取的缓存数值，必须回看原页或嵌入工作簿`);
+  return { charts, normalizedFiles: ["charts.json"], text, warnings };
+}
+
 function renderPdfPages(pdfFile, cacheDir) {
   const pdftoppm = commandPath("pdftoppm");
   if (!pdftoppm) return { files: [], warning: "缺少 pdftoppm，未生成页面视觉缓存" };
@@ -95,6 +144,8 @@ function normalizeOffice(file, extension, cacheDir) {
     const data = entries.get(part);
     return data ? `\n## ${part}\n${decodeXml(data.toString("utf8"))}` : "";
   }).filter(Boolean);
+  const pptCharts = extension === ".pptx" ? extractPptxCharts(entries, cacheDir) : { charts: [], normalizedFiles: [], text: "", warnings: [] };
+  if (pptCharts.text) chunks.push(`\n## PPTX 图表结构化数据\n${pptCharts.text}`);
   const mediaParts = parts.filter((part) => /\/(?:media|embeddings)\//.test(part));
   const normalizedFiles = [];
   for (const part of mediaParts) {
@@ -108,11 +159,12 @@ function normalizeOffice(file, extension, cacheDir) {
   const textFile = path.join(cacheDir, "content.md");
   fs.writeFileSync(textFile, `${chunks.join("\n").trim()}\n`);
   normalizedFiles.unshift(path.relative(cacheDir, textFile));
+  normalizedFiles.push(...pptCharts.normalizedFiles);
   const visual = [".pptx", ".docx"].includes(extension) ? renderOfficeOnce(file, cacheDir) : { files: [], warning: null };
   normalizedFiles.push(...visual.files);
   const renderStrategy = extension === ".pptx" ? "libreoffice-pdf-raster" : extension === ".xlsx" ? "data-extract-html-redraw" : "libreoffice-pdf-raster";
-  const warnings = [visual.warning, extension === ".pptx" ? "PPTX 页面视觉由固定 LibreOffice 策略缓存；字体与复杂图表保真须一次性人工确认" : null].filter(Boolean);
-  return { text: chunks.join("\n"), extractionStrategy: "zip-xml", renderStrategy, normalizedFiles, warnings, status: extension === ".pptx" && warnings.length ? "needs-asset-review" : warnings.length ? "normalized-with-warning" : "normalized" };
+  const warnings = [visual.warning, ...pptCharts.warnings, extension === ".pptx" ? "PPTX 页面视觉由固定 LibreOffice 策略缓存；字体与复杂图表保真须一次性人工确认" : null].filter(Boolean);
+  return { text: chunks.join("\n"), extractionStrategy: "zip-xml", renderStrategy, normalizedFiles, warnings, structuredData: pptCharts.charts.length ? { charts: pptCharts.charts } : {}, status: extension === ".pptx" && warnings.length ? "needs-asset-review" : warnings.length ? "normalized-with-warning" : "normalized" };
 }
 
 function normalizePdf(file, cacheDir) {
@@ -164,6 +216,7 @@ function normalizeOne(file, root, cacheRoot) {
     sourceUnitRefs: [],
     status: result.status,
     warnings: result.warnings,
+    structuredData: result.structuredData || {},
     contentHash: sha(result.text || ""),
     normalizedAt: new Date().toISOString(),
     text: result.text

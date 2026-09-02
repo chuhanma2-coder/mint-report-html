@@ -67,7 +67,7 @@ try {
   run('export-creative-pdf.mjs',[edited,path.join(project,'edited.pdf'),path.join(project,'edited-export.json')]);
   const modelText=await page.locator('#mint-creative-data').textContent(); assert.equal(read('edited-export.json').contentHash,sha(modelText));
   assert.equal(fs.readFileSync(path.join(project,'edited.pdf')).subarray(0,4).toString(),'%PDF');
-  for(const size of [{width:1920,height:1080},{width:1280,height:720},{width:390,height:844}]) { await page.setViewportSize(size); await page.evaluate(()=>document.fonts.ready); await page.screenshot({path:path.join(temp,`${size.width}.png`),fullPage:true}); }
+  for(const size of [{width:1920,height:1080},{width:1280,height:720}]) { await page.setViewportSize(size); await page.evaluate(()=>document.fonts.ready); await page.screenshot({path:path.join(temp,`${size.width}.png`),fullPage:true}); }
   assert.deepEqual(errors,[]);
   // A deliberate connector crossing text must fail, even with same-group permission.
   await page.setViewportSize({width:1920,height:1080});

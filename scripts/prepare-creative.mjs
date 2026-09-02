@@ -7,6 +7,8 @@ import { planDeck } from "../core/scripts/plan-deck.mjs";
 import { createProjectState, sessionBrief } from "../core/scripts/project-state.mjs";
 import { normalizeAssets } from "./normalize-assets.mjs";
 import { syncSceneProject } from "./scene-project.mjs";
+import { writeReportModel } from "./report-model.mjs";
+import { selectRoutes } from "./select-data-expression.mjs";
 
 const source = path.resolve(process.argv[2] || "");
 const output = path.resolve(process.argv[3] || "creative-output");
@@ -64,7 +66,7 @@ const compositionFor = (page) => ({
   mechanism: "用真实关系组织主体、流向或层级，并保留解释空间",
   claim: "以单一判断为视觉起点，用最少但充分的证据支撑"
 })[page.pageRole] || "围绕一个管理问题建立唯一阅读起点和自然阅读路径";
-const titleRoleFor = (page, index) => index === 0 && page.pageRole === "claim" ? "display" : page.pageRole === "claim" ? "section" : "content";
+const titleRoleFor = (page) => ["balanced", "compact"].includes(page.densityProfile) ? "module" : "content";
 const titleRanges = { display: [136, 184], section: [104, 144], content: [72, 104], module: [40, 60] };
 const preferredBreaks = (text) => [...new Set([...text].map((char, index) => "，、；：！？—".includes(char) ? index + 1 : 0).filter((index) => index > 2 && index < text.length - 2))];
 const displayTitleFor = (answer) => {
@@ -108,6 +110,7 @@ const scenes = plan.pageContracts.map((page, index) => {
     compositionIntent: compositionFor(page),
     readingAxis: page.readingAxis,
     densityProfile: page.densityProfile,
+    consolidationContract: page.consolidationContract,
     repeatReason: null
   };
 });
@@ -126,7 +129,7 @@ const brief = {
     motionLanguage: options.motionLanguage || ["scene-reveal", "semantic-progress", "focus-shift"],
     densityRhythm: scenes.map((scene) => scene.densityProfile),
     palette: "mint-scheme-c-original",
-    canvasMode: "dual-fixed-desktop-controlled-mobile",
+    canvasMode: "fixed-desktop-print",
     densityMode
   },
   hardBoundaries: ["不得新增原文没有的事实、数字、实体和正式结论", "mustShow 不得依赖交互才能看见", "PDF 必须展开必要详情"],
@@ -173,7 +176,9 @@ write("source-lock.json", { ...sourceLock, schemaVersion: "0.9.3", assetManifest
 write("content-map.json", map);
 write("creative-brief.json", brief);
 write("source-ledger.json", ledger);
+writeReportModel(output);
 write("management-clusters.json", { schemaVersion: "0.9.3", clusters: plan.managementClusters, decisions: plan.clusteringDecisions });
+write("expression-routes.json", { schemaVersion: "0.12.0", scenes: Object.fromEntries(scenes.map((scene) => [scene.id, selectRoutes(scene.relationTypes)])) });
 const oldOrder = priorState?.currentSceneOrder || [];
 const currentOrder = scenes.map((scene) => scene.id);
 const structuralChange = Boolean(priorState && JSON.stringify(oldOrder) !== JSON.stringify(currentOrder));

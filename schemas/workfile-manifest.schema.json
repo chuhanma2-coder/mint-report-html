@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mint Editable Workfile Manifest",
+  "type": "object",
+  "required": ["schemaVersion", "workfileVersion", "kind", "reportId", "revision", "lineage", "contentHash", "files"],
+  "properties": {
+    "schemaVersion": { "const": "0.12.0" },
+    "workfileVersion": { "const": "0.12" },
+    "kind": { "enum": ["mint-section", "mint-report"] },
+    "reportId": { "type": "string" },
+    "sectionId": { "type": "string" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "parentContentHash": { "type": ["string", "null"] },
+    "lineage": { "type": "array", "items": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "uniqueItems": true },
+    "contentHash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "updatedAt": { "type": "string" },
+    "immutableFiles": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "files": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "mint-section" } } }, "then": { "required": ["sectionId"] } }
+  ]
+}

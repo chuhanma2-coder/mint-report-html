@@ -6,6 +6,7 @@ export function bindFields(html, model) {
   const rendered = html.replace(/<([\w:-]+)\b([^>]*\bdata-field-path=["']([^"']+)["'][^>]*)>([\s\S]*?)<\/\1>/g, (whole, tag, attrs, fieldPath, content) => {
     const value = getField(model, fieldPath);
     if (!/data-edit-policy=["']editable["']/.test(attrs)) return whole;
+    if (/data-edit-kind=["'](?:table|chart|media|diagram)["']/.test(attrs)) return value == null ? (errors.push(`unresolved typed field: ${fieldPath}`), whole) : whole;
     if (typeof value !== "string") { errors.push(`unresolved editable text field: ${fieldPath}`); return whole; }
     if (/<(?:div|p|h[1-6]|section|article|table|li)\b/i.test(content)) { errors.push(`non-leaf editable field: ${fieldPath}`); return whole; }
     const existing = content.replace(/<[^>]*>/g, "").replaceAll("&amp;", "&").replaceAll("&lt;", "<").replaceAll("&gt;", ">").replaceAll("&quot;", '"').replaceAll("&#39;", "'");

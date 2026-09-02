@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schemaVersion", "status", "narrativeSpine", "scenes", "artDirection"],
   "properties": {
-    "schemaVersion": { "const": "0.9.3" },
+    "schemaVersion": { "enum": ["0.9.3", "0.11.0"] },
     "status": { "enum": ["planned", "needs-confirmation", "repair-required"] },
     "narrativeSpine": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
     "scenes": {
@@ -39,6 +39,17 @@
           "risksAndBoundaries": { "type": "array", "items": { "type": "string" } },
           "interactionOpportunities": { "type": "array", "items": { "type": "string" } },
           "compositionIntent": { "type": "string", "minLength": 1 },
+          "densityProfile": { "enum": ["focused", "balanced", "compact"] },
+          "consolidationContract": {
+            "type": "object",
+            "properties": {
+              "defaultMode": { "const": "management-report" },
+              "moduleRange": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+              "lightweightUnitRange": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 },
+              "maxBlankBandRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+              "mayAddSceneWithoutReplan": { "const": false }
+            }
+          },
           "interactiveModules": { "type": "array", "items": { "$ref": "interactive-module.schema.json" } }
         }
       }
@@ -52,7 +63,7 @@
         "motionLanguage": { "type": "array", "items": { "type": "string" }, "maxItems": 3 },
         "densityRhythm": { "type": "array", "items": { "type": "string" } },
         "palette": { "const": "mint-scheme-c-original" },
-        "canvasMode": { "const": "dual-fixed-desktop-controlled-mobile" },
+        "canvasMode": { "enum": ["fixed-desktop-print", "dual-fixed-desktop-controlled-mobile"] },
         "densityMode": { "enum": ["speaker-led", "reading-first"] }
       }
     }

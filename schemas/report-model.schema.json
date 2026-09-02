@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Mint Editable Report Model",
+  "type": "object",
+  "required": ["schemaVersion", "sceneById", "atoms", "tables", "charts", "media", "diagrams", "userEdits"],
+  "properties": {
+    "schemaVersion": { "const": "0.11.0" },
+    "sceneById": { "type": "object" },
+    "atoms": { "type": "object", "additionalProperties": { "type": "string" } },
+    "tables": { "type": "object" },
+    "charts": { "type": "object" },
+    "media": { "type": "object" },
+    "diagrams": { "type": "object" },
+    "userEdits": { "type": "array" }
+  }
+}
+

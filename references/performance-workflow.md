@@ -3,8 +3,8 @@
 ## Pipeline
 
 ```text
-raw assets → normalize once → source units → management clusters
-→ structure state → Scene modules → incremental QA → publish
+capacity preflight → raw assets → normalize once → source units → management clusters
+→ relationship route selection → structure state → batched Scene modules → incremental QA → publish once
 ```
 
 Run preparation once:
@@ -13,7 +13,9 @@ Run preparation once:
 node scripts/run-creative-workflow.mjs prepare <source-file-or-directory> <project-dir> [options.json]
 ```
 
-This writes `asset-manifest.json`, `management-clusters.json`, `project-state.json`, `build-manifest.json`, and generated `session-brief.md`. Cached normalized assets live under `<project-dir>/.work/normalized/<sourceHash>/`. Scene edits never invalidate that cache.
+This first writes `capacity-report.json`, then writes `asset-manifest.json`, `management-clusters.json`, `expression-routes.json`, `project-state.json`, `build-manifest.json`, generated `session-brief.md`, and a stage-timed `performance-report.json`. Cached normalized assets live under `<project-dir>/.work/normalized/<sourceHash>/`. Scene edits never invalidate that cache.
+
+The reference-capacity preflight is deterministic and must finish within 20 seconds. Its current reference boundary is 30 source files, 100 known pages, and 180 MB raw input. It warns that PDF scan status is confirmed only after normalization. Over-capacity input is not summarized or dropped; it is identified so the Agent can request pre-OCR, split work, or parallel owners without making a false 30-minute promise.
 
 ## Asset normalization contract
 
@@ -46,7 +48,7 @@ node scripts/run-creative-workflow.mjs publish <project-dir>
 
 - Review: all current Scenes at desktop; creates `report.html`. Add `--preview-pdf` only when the user actually needs a PDF preview.
 - Revision: affected Scenes at desktop; does not regenerate PDF unless requested.
-- Publish: all Scenes at desktop, laptop, mobile, print, interaction, and collision gates; creates formal PDF.
+- Publish: all Scenes at desktop, laptop, print, interaction, edit-geometry, and collision gates. Phone viewports are not part of authoring or QA. One browser session creates the current PDF and `publish-snapshot.json`; native PPTX extraction reuses the verified layout snapshot instead of launching another browser.
 
 A successful Publish also writes `delivery-manifest.json` and sets `project-state.deliveryStatus=formal-ready`. Review and Revision can never create that state.
 
@@ -54,9 +56,25 @@ All three profiles assemble into `.work/candidates/` first. Only a candidate tha
 
 Revision derives affected Scenes from Scene HTML/CSS, the Scene contract, referenced field values, art direction, asset bytes, and Skill implementation. Unchanged compiled fragments are reused. It records `compiledSceneIds`, `reusedSceneIds`, `normalizationRuns`, script/model-call counts, and elapsed time in `performance-report.json`. No-change revisions exit without revalidation.
 
+HTML field edits update the embedded model immediately but debounce SHA-256 calculation for 400ms. Workfile save recomputes the mutable model and manifest hashes; immutable source and asset hashes are reused. Handoff/merge still verifies the complete package.
+
 If preparation proposes more than eight Scenes, stop at `needs-confirmation` unless the user has confirmed the Scene plan. Set `scenePlanConfirmed: true` in the prepare options only after that confirmation. This prevents a long draft from receiving full visual treatment before its management questions and order are stable.
 
 Do not run custom screenshot-to-PDF loops or duplicate the workflow with ad hoc scripts. Review is the cheap structure/desktop pass, Revision checks affected Scenes only, and Publish is the single full-delivery pass.
+
+## 30-minute release gate
+
+The release benchmark is one task card, three owners working in parallel, eight outline items, 8–12 Scenes, at most 10 ordinary source files per owner, at most 100 text-layer pages in total, no pending scan OCR, and no web research. Human review/waiting time is excluded. The candidate must complete three consecutive benchmark runs within 30 minutes without lowering any source, editability, routing, offline, visual, PPTX, or PDF gate.
+
+Targets inside that wall-clock budget:
+
+- task card: 10 seconds;
+- first editable workfile per owner: 12 minutes, in parallel;
+- ordinary affected-Scene revision: 3 minutes;
+- three-section deterministic merge: 30 seconds;
+- 12-Scene final QA plus HTML/PPTX/PDF: 3 minutes.
+
+If a target is missed, inspect `capacity-report.json` and `performance-report.json`. Never delete source units, skip full editability, force a template, or disable final gates to make the number pass.
 
 ## Context governance
 

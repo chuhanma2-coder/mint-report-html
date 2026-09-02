@@ -33,6 +33,13 @@ export function validateSceneHtml(html, scene, atoms) {
   const elementIds = [...html.matchAll(/data-element-id=["']([^"']+)["']/g)].map((match) => match[1]);
   if (elementIds.length !== new Set(elementIds).size) errors.push(`${scene.id}: data-element-id 重复`);
   for (const qaElement of html.matchAll(/<[^>]+data-qa-role=["'](?:text|connector|node|media|decoration)["'][^>]*>/gi)) if (!/data-element-id=["'][^"']+["']/.test(qaElement[0])) errors.push(`${scene.id}: 几何元素缺少 data-element-id`);
+  for (const typed of html.matchAll(/<[^>]+data-edit-kind=["']([^"']+)["'][^>]*>/gi)) {
+    const tag = typed[0], kind = typed[1];
+    if (!/^(?:table|chart|media|diagram)$/.test(kind)) errors.push(`${scene.id}: 未知可编辑业务对象 ${kind}`);
+    if (!/data-edit-policy=["']editable["']/.test(tag) || !/data-field-path=["'][^"']+["']/.test(tag)) errors.push(`${scene.id}: ${kind} 必须可编辑并绑定稳定字段`);
+    if (!/data-element-id=["'][^"']+["']/.test(tag) || !/data-content-id=["'][^"']+["']/.test(tag)) errors.push(`${scene.id}: ${kind} 缺少稳定 element/content ID`);
+    if (!/data-qa-role=["'](?:node|media)["']/.test(tag) || !/data-qa-overlap=["'](?:forbid|allow-contained|allow-same-group)["']/.test(tag)) errors.push(`${scene.id}: ${kind} 缺少几何合同`);
+  }
   for (const tag of html.matchAll(/<(h[1-6]|p|li|small|figcaption|th|td)\b([^>]*)>/gi)) {
     const attrs = tag[2];
     if (!/data-element-id=["'][^"']+["']/.test(attrs)) errors.push(`${scene.id}: 正式文字 ${tag[1]} 缺少 data-element-id`);

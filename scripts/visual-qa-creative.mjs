@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { geometryAuditInPage } from "./geometry-audit.mjs";
 import { interactionDomAuditInPage } from "./interaction-contract.mjs";
+import { pptLayoutInPage } from "./extract-ppt-layout.mjs";
 
 const input = path.resolve(process.argv[2] || "");
 const outputFile = path.resolve(process.argv[3] || path.join(path.dirname(input || "."), "visual-qa.json"));
@@ -14,13 +16,16 @@ const { chromium } = await import(moduleName.startsWith("/") ? pathToFileURL(mod
 const browser = await chromium.launch({ headless: true, executablePath: process.env.MINT_CHROMIUM_EXECUTABLE || undefined });
 const profileArg = process.argv.find((arg) => arg.startsWith("--profile="))?.slice(10);
 const scenesArg = process.argv.find((arg) => arg.startsWith("--scenes="))?.slice(9).split(",").filter(Boolean) || [];
+const snapshotFile = process.argv.find((arg) => arg.startsWith("--publish-snapshot="))?.slice(19);
+const pdfOutput = process.argv.find((arg) => arg.startsWith("--pdf-output="))?.slice(13);
+const pdfManifest = process.argv.find((arg) => arg.startsWith("--pdf-manifest="))?.slice(15);
 const stateFile = path.join(path.dirname(input), "project-state.json");
 const projectState = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : null;
 const profile = profileArg || projectState?.qaProfile || "review";
 if (profile === "publish" && projectState?.structureState !== "frozen") { console.error("Publish QA requires structureState=frozen"); process.exit(1); }
-const allViewports = [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1280, height: 720 }, { name: "mobile", width: 390, height: 844 }];
+const allViewports = [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1280, height: 720 }];
 const viewports = profile === "publish" ? allViewports : [allViewports[0]];
-const issues = [], results = [];
+const issues = [], results = []; let publishLayout = null;
 fs.mkdirSync(shots, { recursive: true });
 for (const viewport of viewports) {
   const page = await browser.newPage({ viewport });
@@ -28,6 +33,7 @@ for (const viewport of viewports) {
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   await page.goto(pathToFileURL(input).href, { waitUntil: "load" });
   await page.evaluate(() => document.fonts.ready);
+  if (profile === "publish" && viewport.name === "desktop" && snapshotFile) publishLayout = await page.evaluate(pptLayoutInPage);
   for (const message of await page.evaluate(interactionDomAuditInPage)) issues.push({ viewport: viewport.name, gate: 'interaction-contract', message });
   const geometryIssues = await page.evaluate(geometryAuditInPage, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
   for (const issue of geometryIssues) issues.push({ viewport: viewport.name, gate: "geometry-collision", ...issue });
@@ -56,7 +62,8 @@ for (const viewport of viewports) {
         const contract = parent.closest('[data-edit-policy]');
         if (!contract) { audit.uncovered.push(text.slice(0, 48)); continue; }
         const policy = contract.dataset.editPolicy;
-        if (!contract.dataset.fieldPath || !contract.dataset.elementId || !contract.dataset.contentId || contract.dataset.qaRole !== "text") audit.invalidContracts.push(text.slice(0, 48));
+        const typed = /^(?:table|chart|media|diagram)$/.test(contract.dataset.editKind || "");
+        if (!contract.dataset.fieldPath || !contract.dataset.elementId || !contract.dataset.contentId || (typed ? !["node","media"].includes(contract.dataset.qaRole) : contract.dataset.qaRole !== "text")) audit.invalidContracts.push(text.slice(0, 48));
         if (policy === "editable") audit.editable += 1;
         else if (["locked", "derived"].includes(policy) && allowedReasons.has(contract.dataset.editReason)) audit.restricted += 1;
         else audit.invalidRestricted.push(text.slice(0, 48));
@@ -64,7 +71,7 @@ for (const viewport of viewports) {
       return audit;
     }, { total: 0, editable: 0, restricted: 0, uncovered: [], invalidContracts: [], invalidRestricted: [] });
     const blockSelector = "div,p,h1,h2,h3,h4,h5,h6,li,section,article,aside,header,footer,table,thead,tbody,tr,td,th";
-    const coarseEditable = [...document.querySelectorAll('[data-edit-policy="editable"]')].filter((node) => [...node.querySelectorAll(blockSelector)].some((child) => child !== node && child.innerText.trim() && !child.hasAttribute("data-edit-policy"))).map((node) => node.dataset.fieldPath || node.tagName);
+    const coarseEditable = [...document.querySelectorAll('[data-edit-policy="editable"]:not([data-edit-kind])')].filter((node) => [...node.querySelectorAll(blockSelector)].some((child) => child !== node && child.innerText.trim() && !child.hasAttribute("data-edit-policy"))).map((node) => node.dataset.fieldPath || node.tagName);
     const controls = [...document.querySelectorAll('.mint-nav,.mint-page-arrow,.mint-edit-toggle,.mint-interaction-controls')].filter(visible);
     const formalFields = [...document.querySelectorAll('.mint-scene [data-field-path]')].filter(visible);
     const intersects = (a,b) => Math.min(a.right,b.right) > Math.max(a.left,b.left) && Math.min(a.bottom,b.bottom) > Math.max(a.top,b.top);
@@ -79,6 +86,7 @@ for (const viewport of viewports) {
         return intersects(a,box);
       }).map((field) => ({ control: control.className, fieldPath: field.dataset.fieldPath }));
     });
+    const embeddedModel = (() => { try { return JSON.parse(document.querySelector('#mint-creative-data')?.textContent || '{}'); } catch { return {}; } })();
     return {
       scenes: scenes.map((scene) => {
         const box = scene.getBoundingClientRect();
@@ -90,7 +98,16 @@ for (const viewport of viewports) {
         const titleStyle = title ? getComputedStyle(title) : null;
         const lines = title ? renderedLines(title) : [];
         const stageBox = stage?.getBoundingClientRect();
-        return { id: scene.dataset.sceneId, width: box.width, height: box.height, minFont, overflowX: !["hidden", "clip"].includes(overflowX) && scene.scrollWidth > scene.clientWidth + 2, empty: !scene.innerText.trim(), answerVisible: !!title, stage: stage ? { width: parseFloat(getComputedStyle(stage).width), height: parseFloat(getComputedStyle(stage).height), visualWidth: stageBox.width, visualHeight: stageBox.height, left: stageBox.left, right: stageBox.right } : null, title: title ? { role: title.dataset.titleRole, fontSize: parseFloat(titleStyle.fontSize), letterSpacing: parseFloat(titleStyle.letterSpacing) || 0, lines, heightRatio: title.getBoundingClientRect().height / Math.max(1, scene.querySelector('.mint-scene__viewport')?.getBoundingClientRect().height || box.height) } : null };
+        const densityProfile = embeddedModel.sceneById?.[scene.dataset.sceneId]?.densityProfile || "focused";
+        const meaningful = stage ? [...stage.querySelectorAll('h1,h2,h3,h4,h5,h6,p,li,small,table,img,video,canvas,svg')].filter((node) => visible(node) && !node.closest('[data-ui-control]')) : [];
+        const intervals = meaningful.map((node) => { const rect=node.getBoundingClientRect(); return [Math.max(stageBox.top,rect.top),Math.min(stageBox.bottom,rect.bottom)]; }).filter(([top,bottom])=>bottom>top).sort((a,b)=>a[0]-b[0]);
+        const merged = [];
+        for (const interval of intervals) { const last=merged.at(-1); if (last && interval[0] <= last[1] + 2) last[1]=Math.max(last[1],interval[1]); else merged.push([...interval]); }
+        let cursor=stageBox?.top || 0, maxBlank=0;
+        for (const [top,bottom] of merged) { maxBlank=Math.max(maxBlank,top-cursor); cursor=Math.max(cursor,bottom); }
+        if (stageBox) maxBlank=Math.max(maxBlank,stageBox.bottom-cursor);
+        const tableWhitespace = stage ? [...stage.querySelectorAll('[data-edit-kind="table"]')].filter(visible).map((node)=>{const table=node.querySelector('table');if(!table||!visible(table))return null;const outer=node.getBoundingClientRect(),inner=table.getBoundingClientRect();return{fieldPath:node.dataset.fieldPath,outerHeight:outer.height,tableHeight:inner.height,blankHeight:Math.max(0,outer.height-inner.height),blankRatio:Math.max(0,outer.height-inner.height)/Math.max(1,outer.height)}}).filter(Boolean) : [];
+        return { id: scene.dataset.sceneId, width: box.width, height: box.height, minFont, densityProfile, maxBlankBandRatio: stageBox ? maxBlank / Math.max(1,stageBox.height) : 0, tableWhitespace, overflowX: !["hidden", "clip"].includes(overflowX) && scene.scrollWidth > scene.clientWidth + 2, empty: !scene.innerText.trim(), answerVisible: !!title, stage: stage ? { width: parseFloat(getComputedStyle(stage).width), height: parseFloat(getComputedStyle(stage).height), visualWidth: stageBox.width, visualHeight: stageBox.height, left: stageBox.left, right: stageBox.right } : null, title: title ? { role: title.dataset.titleRole, fontSize: parseFloat(titleStyle.fontSize), letterSpacing: parseFloat(titleStyle.letterSpacing) || 0, lines, heightRatio: title.getBoundingClientRect().height / Math.max(1, scene.querySelector('.mint-scene__viewport')?.getBoundingClientRect().height || box.height) } : null };
       }),
       navVisible: visible(document.querySelector(".mint-nav")),
       previousVisible: visible(document.querySelector("[data-scene-prev]")),
@@ -98,15 +115,26 @@ for (const viewport of viewports) {
       editToggleVisible: visible(document.querySelector("[data-edit-toggle]")),
       chromeToggleVisible: visible(document.querySelector("[data-chrome-toggle]")),
       requiredEditable: document.querySelectorAll('[data-edit-policy="editable"][data-field-path]').length,
+      requiredTextEditable: document.querySelectorAll('[data-edit-policy="editable"][data-field-path]:not([data-edit-kind])').length,
+      requiredTypedEditable: document.querySelectorAll('[data-edit-policy="editable"][data-field-path][data-edit-kind]').length,
+      typedKinds: [...new Set([...document.querySelectorAll('[data-edit-policy="editable"][data-field-path][data-edit-kind]')].map(node => node.dataset.editKind))],
+      editableGeometry: [...document.querySelectorAll('[data-edit-policy="editable"][data-field-path]:not([data-edit-kind])')].filter(visible).map(node => { const box=node.getBoundingClientRect(),style=getComputedStyle(node);return { id:node.dataset.elementId,fieldPath:node.dataset.fieldPath,width:box.width,height:box.height,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,overflowX:style.overflowX } }),
       unexpectedEditable: document.querySelectorAll('[contenteditable="true"]:not([data-edit-policy="editable"])').length,
       textAudit,
       coarseEditable,
       controlCollisions,
+      navText: [...document.querySelectorAll('[data-scene-target]')].map(node=>node.textContent.trim()).filter(Boolean),
+      chartLabels: [...document.querySelectorAll('[data-edit-kind="chart"][data-field-path]')].map(node=>{const chart=window.mintFields?.read(node.dataset.fieldPath)||{},items=[...node.querySelectorAll('.mint-chart__legend-item')],swatches=[...node.querySelectorAll('.mint-chart__swatch')];return{fieldPath:node.dataset.fieldPath,series:(chart.series||[]).map(item=>item.name||''),legend:items.map(item=>item.textContent.trim()),colors:swatches.map(item=>getComputedStyle(item).backgroundColor)}}),
       bodyOverflowX: document.documentElement.scrollWidth > document.documentElement.clientWidth + 2
     };
   }, scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : []);
   if (state.bodyOverflowX) issues.push({ viewport: viewport.name, gate: "overflow", message: "页面存在横向溢出" });
   if (!state.navVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "导航不可见" });
+  if (state.navText.length) issues.push({ viewport: viewport.name, gate: "navigation", message: "页面圆点导航包含可见标题文字", samples: state.navText.slice(0,3) });
+  for (const chart of state.chartLabels) {
+    if (chart.legend.length !== chart.series.length || chart.series.some((name,index)=>name !== chart.legend[index])) issues.push({ viewport: viewport.name, gate: "chart-labels", fieldPath: chart.fieldPath, message: "图表系列名称未完整显示或顺序不一致" });
+    if (chart.series.length === 2 && (chart.colors[0] !== "rgb(47, 134, 166)" || chart.colors[1] !== "rgb(240, 138, 93)")) issues.push({ viewport: viewport.name, gate: "chart-colors", fieldPath: chart.fieldPath, message: "双系列图表必须使用固定蓝橙配色" });
+  }
   if (!state.previousVisible || !state.nextVisible) issues.push({ viewport: viewport.name, gate: "navigation", message: "左右翻页控件不可见" });
   if (!state.editToggleVisible) issues.push({ viewport: viewport.name, gate: "editability", message: "可见编辑入口不可用" });
   if (!state.chromeToggleVisible) issues.push({ viewport: viewport.name, gate: "focus-mode", message: "可见清屏入口不可用" });
@@ -121,14 +149,17 @@ for (const viewport of viewports) {
   for (const scene of state.scenes) {
     if (scene.overflowX) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "overflow", message: "场景横向溢出" });
     if (scene.empty || !scene.answerVisible) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "reading-start", message: "场景缺少明确阅读起点" });
-    if (scene.minFont && scene.minFont < (viewport.name === "mobile" ? 13 : 14)) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "typography", message: `最小字号 ${scene.minFont}px` });
+    if (scene.minFont && scene.minFont < 14) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "typography", message: `最小字号 ${scene.minFont}px` });
+    const blankLimit = scene.densityProfile === "compact" ? .32 : scene.densityProfile === "balanced" ? .40 : .55;
+    if (["balanced", "compact"].includes(scene.densityProfile) && scene.maxBlankBandRatio > blankLimit) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "information-density", message: `最大连续空白带占页面 ${(scene.maxBlankBandRatio * 100).toFixed(1)}%，超过 ${Math.round(blankLimit * 100)}%；应合并相关模块或重组版式` });
+    for (const table of scene.tableWhitespace) if (table.blankHeight > 140 && table.blankRatio > .35) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "table-density", fieldPath: table.fieldPath, message: `表格容器比实际表格多出 ${Math.round(table.blankHeight)}px 空白；应使用内容高度而非拉伸填满` });
     if (!scene.stage) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "canvas-contract", message: "缺少场景画布" });
-    if (viewport.name !== "mobile" && scene.stage && (Math.abs(scene.stage.width - 1920) > 1 || Math.abs(scene.stage.height - 1080) > 1)) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "canvas-contract", message: `桌面画布不是 1920×1080：${scene.stage.width}×${scene.stage.height}` });
-    if (viewport.name !== "mobile" && scene.stage && (Math.abs(scene.stage.visualWidth - viewport.width) > 2 || Math.abs(scene.stage.left) > 2 || Math.abs(scene.stage.right - viewport.width) > 2)) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "canvas-scaling", message: `固定画布没有完整缩放到视口：left=${scene.stage.left}, right=${scene.stage.right}, width=${scene.stage.visualWidth}` });
+    if (scene.stage && (Math.abs(scene.stage.width - 1920) > 1 || Math.abs(scene.stage.height - 1080) > 1)) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "canvas-contract", message: `桌面画布不是 1920×1080：${scene.stage.width}×${scene.stage.height}` });
+    if (scene.stage && (Math.abs(scene.stage.visualWidth - viewport.width) > 2 || Math.abs(scene.stage.left) > 2 || Math.abs(scene.stage.right - viewport.width) > 2)) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "canvas-scaling", message: `固定画布没有完整缩放到视口：left=${scene.stage.left}, right=${scene.stage.right}, width=${scene.stage.visualWidth}` });
     if (!scene.title) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "title-contract", message: "缺少标题合同" });
     if (scene.title) {
       const ranges = { display: [136,184], section: [104,144], content: [72,104], module: [40,60] };
-      const range = viewport.name === "mobile" ? [36,58] : ranges[scene.title.role];
+      const range = ranges[scene.title.role];
       if (!range || scene.title.fontSize < range[0] - .5 || scene.title.fontSize > range[1] + .5) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "title-role-size", message: `标题角色 ${scene.title.role} 的字号 ${scene.title.fontSize}px 不在合法范围` });
       if (scene.title.lines.length > 2) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "title-lines", message: `标题渲染为 ${scene.title.lines.length} 行`, lines: scene.title.lines });
       if (/^[，。、；：？！）》】」』…]/.test(scene.title.lines[1] || "")) issues.push({ viewport: viewport.name, sceneId: scene.id, gate: "title-break", message: "标题第二行以闭合标点开头", lines: scene.title.lines });
@@ -139,8 +170,21 @@ for (const viewport of viewports) {
     }
   }
   await page.keyboard.press("e");
-  const editingOn = await page.evaluate(() => ({ body: document.body.classList.contains("editing"), editable: document.querySelectorAll('[data-edit-policy="editable"][contenteditable="true"]').length, unexpected: document.querySelectorAll('[contenteditable="true"]:not([data-edit-policy="editable"])').length }));
-  if (!editingOn.body || editingOn.editable !== state.requiredEditable || editingOn.unexpected) issues.push({ viewport: viewport.name, gate: "editability", message: `E 键编辑覆盖异常：${editingOn.editable}/${state.requiredEditable}` });
+  const editingOn = await page.evaluate(() => ({ body: document.body.classList.contains("editing"), editable: document.querySelectorAll('[data-edit-policy="editable"]:not([data-edit-kind])[contenteditable="true"]').length, typed: document.querySelectorAll('.editing [data-edit-policy="editable"][data-edit-kind]').length, unexpected: document.querySelectorAll('[contenteditable="true"]:not([data-edit-policy="editable"])').length, geometry:[...document.querySelectorAll('[data-edit-policy="editable"][data-field-path]:not([data-edit-kind])')].map(node=>{const box=node.getBoundingClientRect(),style=getComputedStyle(node);return{id:node.dataset.elementId,fieldPath:node.dataset.fieldPath,width:box.width,height:box.height,scrollWidth:node.scrollWidth,clientWidth:node.clientWidth,scrollHeight:node.scrollHeight,clientHeight:node.clientHeight,overflowX:style.overflowX,overflowY:style.overflowY}}) }));
+  if (!editingOn.body || editingOn.editable !== state.requiredTextEditable || editingOn.typed !== state.requiredTypedEditable || editingOn.unexpected) issues.push({ viewport: viewport.name, gate: "editability", message: `E 键编辑覆盖异常：文字 ${editingOn.editable}/${state.requiredTextEditable}，业务对象 ${editingOn.typed}/${state.requiredTypedEditable}` });
+  for (const field of editingOn.geometry) {
+    const before = state.editableGeometry.find(item => item.id === field.id && item.fieldPath === field.fieldPath);
+    if (!field.width || !field.height || (before && field.width + 1 < before.width * .95)) issues.push({ viewport: viewport.name, gate: "edit-geometry", fieldPath: field.fieldPath, message: `编辑区域缩窄或不可见：${field.width}px，编辑前 ${before?.width || 0}px` });
+    if (field.scrollWidth > field.clientWidth + 2 && !["visible","clip"].includes(field.overflowX)) issues.push({ viewport: viewport.name, gate: "edit-geometry", fieldPath: field.fieldPath, message: "编辑文字存在不可达的横向截断" });
+    if (field.scrollHeight > field.clientHeight + 2 && !["visible","clip"].includes(field.overflowY)) issues.push({ viewport: viewport.name, gate: "edit-geometry", fieldPath: field.fieldPath, message: "编辑文字存在不可达的纵向截断" });
+  }
+  for (const kind of state.typedKinds) {
+    const target=page.locator(`[data-edit-kind="${kind}"][data-edit-policy="editable"]`).first();await target.scrollIntoViewIfNeeded();await target.click();
+    const editor=await page.evaluate(()=>{const node=document.querySelector('.mint-editor'),box=node?.getBoundingClientRect(),close=node?.querySelector('.mint-editor__close'),closeBox=close?.getBoundingClientRect();return node&&box?{width:box.width,height:box.height,inputs:node.querySelectorAll('input,textarea,select').length,viewport:innerWidth,close:closeBox?{width:closeBox.width,height:closeBox.height,visible:getComputedStyle(close).display!=="none",inside:closeBox.left>=box.left&&closeBox.right<=box.right&&closeBox.top>=box.top&&closeBox.bottom<=box.bottom}:null}:null});
+    if (!editor || editor.width + 2 < Math.min(900, editor.viewport - 48) || !editor.inputs) issues.push({ viewport: viewport.name, gate: "typed-editor-geometry", kind, message: "类型化编辑器尺寸不足或缺少输入控件" });
+    if (!editor?.close?.visible || !editor.close.inside || editor.close.width < 88 || editor.close.height < 44) issues.push({ viewport: viewport.name, gate: "typed-editor-close", kind, message: "编辑弹窗关闭按钮不够明显、未位于弹窗内或点击区域不足" });
+    await page.locator('.mint-editor__close').click();
+  }
   const editGeometry = await page.evaluate(geometryAuditInPage, scenesArg);
   for (const issue of editGeometry) issues.push({ viewport: viewport.name, mode: 'editing', gate: 'geometry-collision', ...issue });
   await page.keyboard.press("e");
@@ -172,11 +216,21 @@ for (const viewport of viewports) {
 const printPage = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
 await printPage.goto(pathToFileURL(input).href, { waitUntil: "load" });
 await printPage.emulateMedia({ media: "print", reducedMotion: "reduce" });
-const printState = await printPage.evaluate(() => ({ hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, visibleControls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-page-arrow,.mint-edit-toggle")].filter((node) => getComputedStyle(node).display !== "none").length }));
+const printState = await printPage.evaluate(() => ({ hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, visibleControls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-page-arrow,.mint-edit-toggle")].filter((node) => getComputedStyle(node).display !== "none").length, scenes:[...document.querySelectorAll('.mint-scene')].map(scene=>{const page=scene.getBoundingClientRect(),stage=scene.querySelector('.mint-scene__stage')?.getBoundingClientRect();return{id:scene.dataset.sceneId,text:scene.innerText.trim().length,pageWidth:page.width,pageHeight:page.height,stageWidth:stage?.width||0,stageHeight:stage?.height||0}}) }));
 if (printState.hiddenDetails) issues.push({ gate: "print", message: "打印状态仍隐藏必要详情" });
 if (printState.visibleControls) issues.push({ gate: "print", message: "打印状态仍显示交互控件" });
+for (const scene of printState.scenes) if (!scene.text || scene.stageWidth < scene.pageWidth * .95 || scene.stageHeight < scene.pageHeight * .95) issues.push({ gate: "pdf-nonblank", sceneId: scene.id, message: `打印页面为空或内容画布缩放异常：${scene.stageWidth}×${scene.stageHeight}` });
+if (profile === "publish" && pdfOutput && pdfManifest && !issues.length) {
+  fs.mkdirSync(path.dirname(path.resolve(pdfOutput)), { recursive: true });
+  await printPage.pdf({ path: path.resolve(pdfOutput), width: "16in", height: "9in", printBackground: true, preferCSSPageSize: true, displayHeaderFooter: false, margin: { top: "0", right: "0", bottom: "0", left: "0" } });
+  const model = await printPage.locator("#mint-creative-data").textContent(), contentHash = crypto.createHash("sha256").update(model || "").digest("hex"), pdfBytes = fs.readFileSync(path.resolve(pdfOutput));
+  const pdfPageCount=(pdfBytes.toString("latin1").match(/\/Type\s*\/Page\b/g)||[]).length;
+  if (pdfPageCount !== printState.scenes.length) issues.push({ gate:"pdf-page-count", message:`PDF页数 ${pdfPageCount} 与场景数 ${printState.scenes.length} 不一致` });
+  if (!issues.length) { const original = fs.readFileSync(input, "utf8"), updated = original.replace(/<meta name="mint-pdf-state" content="[^"]*">/g, "").replace(/<meta name="mint-pdf-content-hash" content="[^"]*">/g, "").replace("</head>", `<meta name="mint-pdf-state" content="available"><meta name="mint-pdf-content-hash" content="${contentHash}"></head>`); fs.writeFileSync(input, updated); fs.writeFileSync(path.resolve(pdfManifest), `${JSON.stringify({ schemaVersion:"0.12.0",status:"matched",kind:"formal",mode:"validated-print-session",htmlFile:path.basename(input),pdfFile:path.basename(pdfOutput),contentHash,htmlHash:crypto.createHash("sha256").update(updated).digest("hex"),pdfHash:crypto.createHash("sha256").update(pdfBytes).digest("hex"),sceneCount:printState.scenes.length,pdfPageCount,generatedAt:new Date().toISOString(),exportState:printState },null,2)}\n`); }
+}
 await printPage.close();
 await browser.close();
+if (snapshotFile && publishLayout && !issues.length) { fs.mkdirSync(path.dirname(path.resolve(snapshotFile)), { recursive: true }); fs.writeFileSync(path.resolve(snapshotFile), `${JSON.stringify({ schemaVersion:"0.12.0",contentHash:publishLayout.contentHash,layout:publishLayout,createdAt:new Date().toISOString() },null,2)}\n`); }
 const report = { schemaVersion: "0.10.0-rc.1", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ passed: report.passed, viewports: results.length, issues: issues.length, outputFile }, null, 2));

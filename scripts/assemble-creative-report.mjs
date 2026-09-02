@@ -8,6 +8,7 @@ import { validateInteractions } from "./interaction-contract.mjs";
 import { bindFields, escapeHtml } from "./field-bindings.mjs";
 import { inlineAssets } from "./offline-assets.mjs";
 import { sceneInput, implementationHash } from "./scene-inputs.mjs";
+import { createReportModel } from "./report-model.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const skill = path.resolve(here, "..");
@@ -19,8 +20,8 @@ const read = (file) => fs.readFileSync(file, "utf8");
 const brief = JSON.parse(read(path.join(projectDir, "creative-brief.json")));
 const map = JSON.parse(read(path.join(projectDir, "content-map.json")));
 const state = JSON.parse(read(path.join(projectDir, "project-state.json")));
-const sceneById = Object.fromEntries(brief.scenes.map((scene) => [scene.id, scene]));
-const model = { schemaVersion: "0.10.0-rc.1", sceneById, atoms: Object.fromEntries(map.contentAtoms.map((atom) => [atom.id, atom.text])), sourceSetHash: state.sourceSetHash, structureHash: state.structureHash };
+const model = { ...createReportModel(projectDir), sourceSetHash: state.sourceSetHash, structureHash: state.structureHash };
+const sceneById = model.sceneById;
 const candidate = process.argv.includes("--candidate");
 const hasInteractions = brief.scenes.some(scene => scene.interactiveModules?.length);
 const implHash = implementationHash(skill), cacheDir = path.join(projectDir, '.work/scene-cache');
@@ -47,10 +48,10 @@ for (const sceneId of state.currentSceneOrder) {
 if (errors.length) { console.error(JSON.stringify({ passed: false, errors }, null, 2)); process.exit(1); }
 const tokens = read(path.join(skill, "assets", "mint-creative-tokens.css"));
 const runtimeCss = read(path.join(skill, "assets", "mint-creative-runtime.css")) + (hasInteractions ? read(path.join(skill, "assets", "mint-interactions.css")) : "");
-const runtimeJs = ["mint-fields.js", "mint-creative-runtime.js", ...(hasInteractions ? ["mint-interactions.js"] : []), "mint-export-state.js"].map(file => read(path.join(skill, "assets", file))).join("\n");
+const runtimeJs = ["mint-fields.js", "mint-typed-editor.js", "mint-creative-runtime.js", ...(hasInteractions ? ["mint-interactions.js"] : []), "mint-export-state.js", "mint-package-export.js"].map(file => read(path.join(skill, "assets", file))).join("\n");
 const contentHash = crypto.createHash("sha256").update(JSON.stringify(model)).digest("hex");
-const nav = state.currentSceneOrder.map((id) => `<button type="button" data-scene-target data-scene-id="${escapeHtml(id)}">${escapeHtml((sceneById[id].displayTitle || sceneById[id].sceneAnswer).slice(0, 18))}</button>`).join("");
-const document = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="mint-content-hash" content="${contentHash}"><meta name="mint-pdf-state" content="stale"><title>Mint Report</title><style>${tokens}\n${runtimeCss}\n${styles.join("\n")}</style></head><body data-build-profile="${state.qaProfile}"><main class="mint-report-scenes">${fragments.join("\n")}</main><nav class="mint-nav"><div class="mint-nav__items">${nav}</div><span class="mint-nav__progress"></span><button class="mint-control" data-export-pdf>下载 PDF</button><button class="mint-control mint-chrome-toggle" data-chrome-toggle aria-label="隐藏演示控件" aria-pressed="false">清屏 · H</button></nav><button class="mint-page-arrow mint-page-arrow--prev mint-control" type="button" data-scene-prev aria-label="上一页">←</button><button class="mint-page-arrow mint-page-arrow--next mint-control" type="button" data-scene-next aria-label="下一页">→</button><button class="mint-edit-toggle mint-control" type="button" data-edit-toggle aria-label="编辑文字" aria-pressed="false"><span>✎</span><span data-edit-label>编辑 · E</span></button><button class="mint-chrome-restore mint-control" type="button" data-chrome-restore aria-label="显示演示控件">显示控件 · H</button><span class="mint-edit-status">编辑中</span><div class="mint-modal" hidden><div class="mint-modal__content"></div><button data-modal-close data-ui-control>关闭</button></div><script type="application/json" id="mint-creative-data">${JSON.stringify(model).replaceAll("<", "\\u003c")}</script><script>${runtimeJs}</script></body></html>`;
+const nav = state.currentSceneOrder.map((id, index) => { const title=sceneById[id].displayTitle||sceneById[id].sceneAnswer||`第${index+1}页`;return `<button type="button" data-scene-target data-scene-id="${escapeHtml(id)}" aria-label="第${index+1}页：${escapeHtml(title)}" title="${escapeHtml(title)}"><span aria-hidden="true"></span></button>` }).join("");
+const document = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="mint-content-hash" content="${contentHash}"><meta name="mint-pdf-state" content="stale"><title>Mint Report</title><style>${tokens}\n${runtimeCss}\n${styles.join("\n")}</style></head><body data-build-profile="${state.qaProfile}"><main class="mint-report-scenes">${fragments.join("\n")}</main><nav class="mint-nav"><div class="mint-nav__items">${nav}</div><button class="mint-control" data-save-workfile hidden>保存当前版</button><button class="mint-control" data-export-package hidden>导出技术包</button><button class="mint-control" data-export-pdf>下载 PDF</button><button class="mint-control mint-chrome-toggle" data-chrome-toggle aria-label="隐藏演示控件" aria-pressed="false">清屏 · H</button></nav><button class="mint-page-arrow mint-page-arrow--prev mint-control" type="button" data-scene-prev aria-label="上一页">←</button><button class="mint-page-arrow mint-page-arrow--next mint-control" type="button" data-scene-next aria-label="下一页">→</button><button class="mint-edit-toggle mint-control" type="button" data-edit-toggle aria-label="编辑内容" aria-pressed="false"><span>✎</span><span data-edit-label>编辑 · E</span></button><button class="mint-chrome-restore mint-control" type="button" data-chrome-restore aria-label="显示演示控件">显示控件 · H</button><span class="mint-edit-status">编辑中</span><div class="mint-modal" hidden><div class="mint-modal__content"></div><button data-modal-close data-ui-control>关闭</button></div><script type="application/json" id="mint-creative-data">${JSON.stringify(model).replaceAll("<", "\\u003c")}</script><script>${runtimeJs}</script></body></html>`;
 const inlined = inlineAssets(document, projectDir);
 fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 fs.writeFileSync(path.join(path.dirname(outputFile), "offline-asset-manifest.json"), `${JSON.stringify(inlined.manifest, null, 2)}\n`);
