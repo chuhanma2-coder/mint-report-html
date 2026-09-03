@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.10.0-rc.1";
+const VERSION = "0.13.0";
 const STATES = new Set(["exploring", "soft-frozen", "frozen"]);
 const PROFILES = new Set(["review", "revision", "publish"]);
 const digest = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");

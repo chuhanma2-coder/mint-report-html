@@ -62,6 +62,8 @@ If preparation proposes more than eight Scenes, stop at `needs-confirmation` unl
 
 Do not run custom screenshot-to-PDF loops or duplicate the workflow with ad hoc scripts. Review is the cheap structure/desktop pass, Revision checks affected Scenes only, and Publish is the single full-delivery pass.
 
+After a successful Review or Revision, run `pack-section` exactly once. It verifies the current static and desktop-browser reports, embeds the package, reads it back, compares model and file hashes, and atomically promotes the `.mint-section.html`. A passing handoff becomes `soft-frozen/review-ready`. Do not pack failed or intermediate candidates.
+
 ## 30-minute release gate
 
 The release benchmark is one task card, three owners working in parallel, eight outline items, 8–12 Scenes, at most 10 ordinary source files per owner, at most 100 text-layer pages in total, no pending scan OCR, and no web research. Human review/waiting time is excluded. The candidate must complete three consecutive benchmark runs within 30 minutes without lowering any source, editability, routing, offline, visual, PPTX, or PDF gate.

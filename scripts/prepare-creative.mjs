@@ -88,6 +88,8 @@ const scenes = plan.pageContracts.map((page, index) => {
   const displayTitle = displayTitleFor(page.pageAnswer);
   return {
     id: page.id,
+    decisionKey: page.decisionKey,
+    sectionPageBudget: page.sectionPageBudget,
     managementQuestion: page.pageQuestion,
     sceneAnswer: page.pageAnswer,
     displayTitle,
@@ -114,6 +116,27 @@ const scenes = plan.pageContracts.map((page, index) => {
     repeatReason: null
   };
 });
+const numericById = new Map((map.numericClaims || []).map(claim => [claim.id, claim]));
+const discourseById = new Map((map.discourseUnits || []).map(unit => [unit.id, unit]));
+const routeContextFor = scene => {
+  const discourse = scene.sourceUnitRefs.map(ref => discourseById.get(ref)).filter(Boolean);
+  const claims = [...new Set(discourse.flatMap(unit => unit.numericClaimRefs || []))].map(ref => numericById.get(ref)).filter(Boolean);
+  const periods = [...new Set([
+    ...claims.map(claim => claim.period).filter(period => period && period !== "未提供"),
+    ...discourse.flatMap(unit => unit.text.match(/Y\d+|20\d{2}年?|H[12]|Q[1-4]|上半年|下半年|第[一二三四\d]+季度|当前|目前|本轮/gi) || [])
+  ])];
+  return {
+    relationTypes: scene.relationTypes,
+    decisionIntent: `${scene.managementQuestion} ${scene.sceneAnswer}`,
+    metrics: [...new Set(claims.map(claim => claim.subject).filter(Boolean))],
+    categories: [...new Set(discourse.map(unit => unit.subject).filter(subject => subject && subject !== "待确认"))],
+    periods,
+    values: claims.map(claim => claim.value),
+    units: [...new Set(claims.map(claim => claim.unit).filter(unit => unit && unit !== "未提供"))],
+    containsNegative: claims.some(claim => claim.value < 0),
+    crossesZero: claims.some(claim => claim.value < 0) && claims.some(claim => claim.value >= 0)
+  };
+};
 const briefStatus = task.status === "needs-confirmation" || map.status === "needs-confirmation" || plan.status === "needs-confirmation"
   ? "needs-confirmation"
   : plan.status === "repair-required" ? "repair-required" : "planned";
@@ -178,7 +201,7 @@ write("creative-brief.json", brief);
 write("source-ledger.json", ledger);
 writeReportModel(output);
 write("management-clusters.json", { schemaVersion: "0.9.3", clusters: plan.managementClusters, decisions: plan.clusteringDecisions });
-write("expression-routes.json", { schemaVersion: "0.12.0", scenes: Object.fromEntries(scenes.map((scene) => [scene.id, selectRoutes(scene.relationTypes)])) });
+write("expression-routes.json", { schemaVersion: "0.13.0", scenes: Object.fromEntries(scenes.map((scene) => [scene.id, selectRoutes(routeContextFor(scene))])) });
 const oldOrder = priorState?.currentSceneOrder || [];
 const currentOrder = scenes.map((scene) => scene.id);
 const structuralChange = Boolean(priorState && JSON.stringify(oldOrder) !== JSON.stringify(currentOrder));

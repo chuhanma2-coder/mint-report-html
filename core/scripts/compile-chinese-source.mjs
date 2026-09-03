@@ -134,12 +134,12 @@ function relationHint(previous, current) {
 
 function numericClaimsFor(unit, indexStart) {
   const claims = [];
-  const pattern = /(?:^|[^A-Za-z])((?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?))\s*(%|个百分点|美元|万元|亿元|元|个页面|个区块|个|份|页|次|个月|月|年|天|小时|条|项)?/g;
+  const pattern = /(?:^|[^A-Za-z])([+\-−–]?(?:\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?))\s*(%|个百分点|美元|万元|亿元|元|个页面|个区块|个|份|页|次|个月|月|年|天|小时|条|项)?/g;
   let match;
   while ((match = pattern.exec(unit.text))) {
     const before = unit.text.slice(Math.max(0, match.index - 1), match.index + match[0].indexOf(match[1]));
     if (/V$/i.test(before) || /^\d+[）).、]/.test(unit.text.slice(match.index))) continue;
-    const value = Number(match[1].replaceAll(",", ""));
+    const value = Number(match[1].replaceAll(",", "").replace(/[−–]/g, "-"));
     const unitName = match[2] || "未提供";
     const context = unit.text;
     const role = /上限|不超过|不得超过/.test(context) ? "threshold" : /占|比例|%/.test(match[0]) ? "ratio" : /投入|成本|金额/.test(context) ? "actual" : "category-value";
@@ -149,7 +149,7 @@ function numericClaimsFor(unit, indexStart) {
       value,
       unit: unitName,
       subject: explicitSubject(context) || unit.section,
-      period: /当前|目前|本轮/.test(context) ? "当前" : "未提供",
+      period: context.match(/Y\d+|20\d{2}年?|H[12]|Q[1-4]|上半年|下半年|第[一二三四\d]+季度|当前|目前|本轮/i)?.[0] || "未提供",
       role,
       materiality: /占|投入|成本|上限|达到|完成|覆盖/.test(context) ? "primary" : "supporting",
       displayRequirement: /占|投入|成本|上限|达到|完成|覆盖/.test(context) ? "primary-visual" : "callout",

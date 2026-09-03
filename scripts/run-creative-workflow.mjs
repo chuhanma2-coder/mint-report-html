@@ -39,7 +39,7 @@ if (profile === 'publish' && state.structureState !== 'frozen') { console.error(
 if (state.openIssues?.length) { console.error(`Resolve openIssues: ${state.openIssues.join('; ')}`); process.exit(1); }
 const work = path.join(project, '.work'); fs.mkdirSync(path.join(work, 'candidates'), { recursive: true });
 const candidate = fs.mkdtempSync(path.join(work, 'candidates', 'build-'));
-const report = path.join(candidate, 'report.html'), qa = path.join(candidate, 'qa-report.json'), visual = path.join(candidate, 'visual-qa.json');
+const report = path.join(candidate, 'report.html'), qa = path.join(candidate, 'qa-report.json'), modelQa = path.join(candidate, 'model-qa.json'), visual = path.join(candidate, 'visual-qa.json');
 const publishSnapshot = path.join(candidate,'publish-snapshot.json'), publishPdf = path.join(candidate,'report.pdf'), publishPdfManifest = path.join(candidate,'export-manifest.json');
 const lastInputsFile = path.join(work, 'last-good-inputs.json');
 const oldInputs = fs.existsSync(lastInputsFile) ? read(lastInputsFile) : null;
@@ -54,6 +54,7 @@ try {
   affected = profile !== 'revision' || globalChange ? state.currentSceneOrder : state.currentSceneOrder.filter(id => inputs.scenes[id] !== oldInputs.scenes[id]);
   if (!affected.length) { console.log(JSON.stringify({ passed: true, phase: profile, unchanged: true, checkedScenes: [], elapsedMs: Date.now()-started })); process.exit(0); }
   write(path.join(candidate,'project-state.json'), { ...state, qaProfile: profile, affectedSceneIds: affected });
+  run('validate-scene-project.mjs', [project,modelQa]);
   const assemble = () => run('assemble-creative-report.mjs', [project,report,'--candidate',`--scenes=${affected.join(',')}`]);
   assemble();
   run('qa-creative-html.mjs', [report,path.join(project,'creative-brief.json'),qa]);
@@ -64,7 +65,7 @@ try {
     run('repair-geometry.mjs',[project,visual,path.join(candidate,'geometry-repair.json')]);
     assemble(); run('qa-creative-html.mjs',[report,path.join(project,'creative-brief.json'),qa]); run('visual-qa-creative.mjs',visualArgs);
   }
-  const files = ['report.html','qa-report.json','visual-qa.json','assembly-report.json','offline-asset-manifest.json'];
+  const files = ['report.html','qa-report.json','model-qa.json','visual-qa.json','assembly-report.json','offline-asset-manifest.json'];
   const exportPdf = profile === 'publish' || process.argv.includes('--preview-pdf');
   let pdfName, exportName;
   if (exportPdf) {

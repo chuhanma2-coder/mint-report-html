@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { createProjectState, sessionBrief } from "../core/scripts/project-state.mjs";
+import { createProjectState, sessionBrief, transitionProjectState } from "../core/scripts/project-state.mjs";
 import { writeReportModel } from "./report-model.mjs";
 import { createZip, readZip } from "./mint-zip.mjs";
 
@@ -28,7 +28,7 @@ function validateBrief(input) {
   if (new Set(sections.map(section => section.id)).size !== sections.length || new Set(sections.map(section => section.order)).size !== sections.length) throw new Error("Task card section ids and order values must be unique");
   const reportId = safeId(input.reportId), outlineOrder = [...(input.outlineOrder || sections.flatMap(section => section.outlineItems))].map(String);
   return {
-    schemaVersion: SCHEMA_VERSION, kind: "mint-task-card", skillContractVersion: "mint-report-html/0.12", reportId,
+    schemaVersion: SCHEMA_VERSION, kind: "mint-task-card", skillContractVersion: "mint-report-html/0.13", reportId,
     title: String(input.title).trim(), purpose: String(input.purpose || "管理汇报").trim(), outlineOrder, sections,
     warnings: [...(input.warnings || [])].map(String),
     designContract: { ...DESIGN_CONTRACT, artDirectionSeed: reportId },
@@ -77,6 +77,38 @@ function writePackageOutput(kind, projectDir, briefFile, sectionId, outputFile, 
   fs.writeFileSync(workFile, html);
   let technicalZip = null; if (isZip) { fs.writeFileSync(outputFile, createZip(entries)); technicalZip = outputFile; }
   return { workFile, technicalZip, entries: entries.length, bytes: fs.statSync(workFile).size };
+}
+
+function validateReviewReady(projectDir) {
+  const stateFile = path.join(projectDir, "project-state.json"), qaFile = path.join(projectDir, "qa-report.json"), visualFile = path.join(projectDir, "visual-qa.json");
+  if (![stateFile, qaFile, visualFile].every(fs.existsSync)) throw new Error("pack-section requires current project-state.json, qa-report.json, and visual-qa.json");
+  const state = readJson(stateFile), qa = readJson(qaFile), visual = readJson(visualFile);
+  if (!/^(review|revision)-ready$/.test(String(state.deliveryStatus || ""))) throw new Error("pack-section requires a successful Review or Revision candidate");
+  if (state.openIssues?.length) throw new Error(`pack-section blocked by open issues: ${state.openIssues.join("; ")}`);
+  if (qa.passed !== true || visual.passed !== true) throw new Error("pack-section requires passing static and desktop browser QA");
+  return state;
+}
+
+function verifiedPackSection(projectDir, briefFile, sectionId, outputFile, companionFile) {
+  if (/\.zip$/i.test(outputFile)) throw new Error("pack-section now produces one verified .mint-section.html; use export-zip only for technical troubleshooting");
+  const stateFile = path.join(projectDir, "project-state.json"), sessionFile = path.join(projectDir, "session-brief.md"), priorState = fs.readFileSync(stateFile, "utf8"), priorSession = fs.existsSync(sessionFile) ? fs.readFileSync(sessionFile, "utf8") : null;
+  const state = validateReviewReady(projectDir), next = transitionProjectState(state, "soft-freeze");
+  next.deliveryStatus = "review-ready"; next.pendingActions = ["share-current-workfile-or-merge"]; next.lastCompletedAction = "section-package-verified";
+  const extension = path.extname(outputFile), temporary = path.join(path.dirname(outputFile), `.${path.basename(outputFile, extension)}.${process.pid}.tmp${extension}`), previous = `${outputFile}.previous-${process.pid}`;
+  try {
+    writeJson(stateFile, next); fs.writeFileSync(sessionFile, sessionBrief(next));
+    const result = writePackageOutput("mint-section", projectDir, briefFile, sectionId, temporary, companionFile);
+    const entries = readPackageFile(result.workFile), manifest = normalizedManifest(entries); verifyPackage(entries, manifest, path.basename(result.workFile));
+    const packedState = parseJson(entries, "project-state.json");
+    if (packedState.structureState !== "soft-frozen" || packedState.deliveryStatus !== "review-ready") throw new Error("Packed workfile did not preserve the verified section state");
+    if (fs.existsSync(outputFile)) fs.renameSync(outputFile, previous);
+    try { fs.renameSync(result.workFile, outputFile); fs.rmSync(previous, { force: true }); }
+    catch (error) { if (fs.existsSync(previous) && !fs.existsSync(outputFile)) fs.renameSync(previous, outputFile); throw error; }
+    return { ...result, workFile: outputFile, bytes: fs.statSync(outputFile).size, verification: { packageIntegrity: true, modelHash: manifest.contentHash, structureState: packedState.structureState, deliveryStatus: packedState.deliveryStatus } };
+  } catch (error) {
+    fs.writeFileSync(stateFile, priorState); if (priorSession === null) fs.rmSync(sessionFile, { force: true }); else fs.writeFileSync(sessionFile, priorSession);
+    fs.rmSync(temporary, { force: true }); fs.rmSync(previous, { force: true }); throw error;
+  }
 }
 
 function extractPackagePayload(html, label) {
@@ -182,12 +214,12 @@ function unpackWorkfile(inputFile, outputDir) {
 }
 function exportTechnicalZip(inputFile, outputZip) { const entries = readPackageFile(inputFile), manifest = normalizedManifest(entries); verifyPackage(entries, manifest, path.basename(inputFile)); fs.writeFileSync(outputZip, createZip([...entries].map(([name, data]) => ({ name, data })))); return { inputFile, outputZip, bytes: fs.statSync(outputZip).size }; }
 
-function usage() { console.error("Usage:\n  collaboration-package.mjs brief config.json task-card.json\n  collaboration-package.mjs pack-section project task-card section-id output.mint-section.html\n  collaboration-package.mjs merge task-card output-project section1.html section2.html ...\n  collaboration-package.mjs unpack workfile.html output-project\n  collaboration-package.mjs export-zip workfile.html output.zip\n  Legacy ZIP output remains accepted when the pack output ends in .zip"); process.exit(2); }
+function usage() { console.error("Usage:\n  collaboration-package.mjs brief config.json task-card.json\n  collaboration-package.mjs pack-section project task-card section-id output.mint-section.html\n  collaboration-package.mjs merge task-card output-project section1.html section2.html ...\n  collaboration-package.mjs unpack workfile.html output-project\n  collaboration-package.mjs export-zip workfile.html output.zip\n  pack-section produces one verified HTML workfile; export-zip is only for technical troubleshooting"); process.exit(2); }
 
 const command = process.argv[2];
 try {
   if (command === "brief") { const input = path.resolve(process.argv[3] || ""), output = path.resolve(process.argv[4] || ""); if (!fs.existsSync(input) || !output) usage(); const brief = validateBrief(readJson(input)); writeJson(output, brief); console.log(JSON.stringify({ passed: true, output, reportId: brief.reportId, sections: brief.sections.length }, null, 2)); }
-  else if (command === "pack-section") { const project = path.resolve(process.argv[3] || ""), brief = path.resolve(process.argv[4] || ""), sectionId = process.argv[5], output = path.resolve(process.argv[6] || ""), companion = process.argv[7] ? path.resolve(process.argv[7]) : null; if (![project, brief].every(fs.existsSync) || !sectionId || !output) usage(); console.log(JSON.stringify({ passed: true, ...writePackageOutput("mint-section", project, brief, sectionId, output, companion) }, null, 2)); }
+  else if (command === "pack-section") { const project = path.resolve(process.argv[3] || ""), brief = path.resolve(process.argv[4] || ""), sectionId = process.argv[5], output = path.resolve(process.argv[6] || ""), companion = process.argv[7] ? path.resolve(process.argv[7]) : null; if (![project, brief].every(fs.existsSync) || !sectionId || !output) usage(); console.log(JSON.stringify({ passed: true, ...verifiedPackSection(project, brief, sectionId, output, companion) }, null, 2)); }
   else if (command === "merge") { const brief = path.resolve(process.argv[3] || ""), output = path.resolve(process.argv[4] || ""), packages = process.argv.slice(5).map(file => path.resolve(file)); if (!fs.existsSync(brief) || !output || packages.length < 1 || packages.some(file => !fs.existsSync(file))) usage(); console.log(JSON.stringify({ passed: true, ...mergePackages(brief, output, packages) }, null, 2)); }
   else if (command === "pack-report") { const project = path.resolve(process.argv[3] || ""), brief = path.resolve(process.argv[4] || ""), output = path.resolve(process.argv[5] || ""), companion = process.argv[6] ? path.resolve(process.argv[6]) : null; if (![project, brief].every(fs.existsSync) || !output) usage(); console.log(JSON.stringify({ passed: true, ...writePackageOutput("mint-report", project, brief, null, output, companion) }, null, 2)); }
   else if (command === "unpack") { const input = path.resolve(process.argv[3] || ""), output = path.resolve(process.argv[4] || ""); if (!fs.existsSync(input) || !output) usage(); console.log(JSON.stringify({ passed: true, ...unpackWorkfile(input, output) }, null, 2)); }
