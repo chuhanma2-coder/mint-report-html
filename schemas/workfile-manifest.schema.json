@@ -5,7 +5,9 @@
   "required": ["schemaVersion", "workfileVersion", "kind", "reportId", "revision", "lineage", "contentHash", "files"],
   "properties": {
     "schemaVersion": { "const": "0.12.0" },
-    "workfileVersion": { "const": "0.12" },
+    "workfileVersion": { "enum": ["0.12", "0.14"] },
+    "skillContractVersion": { "type": "string" },
+    "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
     "kind": { "enum": ["mint-section", "mint-report"] },
     "reportId": { "type": "string" },
     "sectionId": { "type": "string" },

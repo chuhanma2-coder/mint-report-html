@@ -83,7 +83,7 @@ try {
     if (!process.env.RUNTIME_NODE_MODULES) throw new Error('PPTX publish requires RUNTIME_NODE_MODULES from load_workspace_dependencies');
     const pptLayout = path.join(candidate,'ppt-layout.json'), pptx = path.join(candidate,'report.pptx'), renderDir = path.join(candidate,'pptx-render');
     run('extract-ppt-layout.mjs',[report,pptLayout,`--snapshot=${publishSnapshot}`]);
-    run('export-editable-pptx.mjs',[pptLayout,pptx,renderDir]);
+    run('export-editable-pptx.mjs',[pptLayout,pptx,renderDir,`--reference-dir=${path.join(candidate,'visual-qa','publish-scenes')}`]);
     fs.copyFileSync(path.join(renderDir,'montage.webp'),path.join(candidate,'pptx-montage.webp'));
     files.push('report.pptx','ppt-layout.json','pptx-manifest.json','pptx-montage.webp');
   }
@@ -97,7 +97,8 @@ try {
   build.lastCandidate = path.relative(project,candidate); build.generatedAt = new Date().toISOString();
   write(path.join(candidate,'build-manifest.json'),build);
   const pptxManifest = exportPptx ? read(path.join(candidate,'pptx-manifest.json')) : null;
-  const delivery = { schemaVersion: '0.11.0', status: current.deliveryStatus, structureState: current.structureState, qaProfile: profile, sceneOrder: current.currentSceneOrder, checks: { staticQa: read(qa).passed === true, browserQa: read(visual).passed === true, ...(profile === 'publish' ? { pdfCurrent: read(path.join(candidate,exportName)).status === 'matched' } : {}), ...(exportPptx ? { pptxCurrent: pptxManifest.contentHash === read(path.join(candidate,'ppt-layout.json')).contentHash, pptxNativeEditable: Object.values(pptxManifest.editableObjects || {}).reduce((sum,value)=>sum+value,0) > 0, pptxSixteenNine: pptxManifest.aspectRatio === '16:9', pptxNoPageChrome: !pptxManifest.headers && !pptxManifest.footers && !pptxManifest.pageNumbers } : {}) }, outputs: build.outputs };
+  const pdfManifest=profile==='publish'?read(path.join(candidate,exportName)):null;
+  const delivery = { schemaVersion: '0.14.0', status: current.deliveryStatus, structureState: current.structureState, qaProfile: profile, sceneOrder: current.currentSceneOrder, checks: { staticQa: read(qa).passed === true, browserQa: read(visual).passed === true, ...(profile === 'publish' ? { pdfCurrent: pdfManifest.status === 'matched', pdfSceneCaptureGate: pdfManifest.sceneCaptureGate?.passed === true, pdfArtifactGate: pdfManifest.pdfArtifactGate?.passed === true } : {}), ...(exportPptx ? { pptxCurrent: pptxManifest.contentHash === read(path.join(candidate,'ppt-layout.json')).contentHash, pptxNativeEditable: Object.values(pptxManifest.editableObjects || {}).reduce((sum,value)=>sum+value,0) > 0, pptxSixteenNine: pptxManifest.aspectRatio === '16:9', pptxNoPageChrome: !pptxManifest.headers && !pptxManifest.footers && !pptxManifest.pageNumbers, pptxArtifactGate: pptxManifest.artifactGate?.passed === true } : {}) }, outputs: build.outputs };
   if (!Object.values(delivery.checks).every(Boolean)) throw new Error('Delivery gates incomplete');
   write(path.join(candidate,'delivery-manifest.json'),delivery);
   const capacityFile = path.join(project,'capacity-report.json');

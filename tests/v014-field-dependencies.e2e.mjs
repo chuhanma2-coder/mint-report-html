@@ -1,0 +1,12 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),".."),fixture=spawnSync(process.execPath,[path.join(root,"tests/v011-collaboration-contracts.mjs")],{encoding:"utf8",maxBuffer:20_000_000});assert.equal(fixture.status,0,fixture.stderr||fixture.stdout);const info=JSON.parse(fixture.stdout.trim().split("\n").at(-1)),htmlFile=path.join(info.temp,"product","report.html");
+let html=fs.readFileSync(htmlFile,"utf8");const match=html.match(/(<script[^>]+id="mint-creative-data"[^>]*>)([\s\S]*?)(<\/script>)/);assert.ok(match);const model=JSON.parse(match[2]);model.fieldDependencies=[{id:"chart-note",sourcePath:"charts.C1",targetPath:"atoms.A1",mode:"derived",template:"实际值 {{value}}",bindings:{value:{series:0,index:0,digits:0}}}];model.pendingDependencyReviews=[];html=html.replace(match[0],`${match[1]}${JSON.stringify(model)}${match[3]}`);fs.writeFileSync(htmlFile,html);
+const require=createRequire(path.join(process.env.RUNTIME_NODE_MODULES,"package.json")),playwright=await import(pathToFileURL(require.resolve("playwright")).href),chromium=playwright.chromium||playwright.default?.chromium,browser=await chromium.launch({headless:true,executablePath:process.env.MINT_CHROMIUM_EXECUTABLE||undefined});
+try{const page=await browser.newPage({viewport:{width:1920,height:1080}});await page.goto(pathToFileURL(htmlFile).href,{waitUntil:"load"});const result=await page.evaluate(async()=>{const next=structuredClone(window.mintFields.read("charts.C1"));next.series[0].values=[25];await window.mintFields.set("charts.C1",next,{kind:"chart"});await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return {modelText:window.mintFields.read("atoms.A1"),domText:document.querySelector('[data-field-path="atoms.A1"]')?.textContent,chartText:document.querySelector('[data-field-path="charts.C1"]')?.textContent,pending:window.mintFields.model().pendingDependencyReviews}});assert.equal(result.modelText,"实际值 25");assert.equal(result.domText,"实际值 25");assert.match(result.chartText,/25/);assert.deepEqual(result.pending,[]);console.log(JSON.stringify({passed:true,chartRedrawn:true,derivedTextUpdated:true,pendingReviews:0}))}finally{await browser.close()}

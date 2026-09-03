@@ -9,7 +9,7 @@ import { writeReportModel } from "./report-model.mjs";
 import { createZip, readZip } from "./mint-zip.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const SCHEMA_VERSION = "0.12.0", WORKFILE_VERSION = "0.12";
+const SCHEMA_VERSION = "0.12.0", WORKFILE_VERSION = "0.14";
 const readJson = file => JSON.parse(fs.readFileSync(file, "utf8"));
 const parseJson = (files, name) => { if (!files.has(name)) throw new Error(`Package is missing ${name}`); return JSON.parse(files.get(name).toString("utf8")); };
 const sha = value => crypto.createHash("sha256").update(value).digest("hex");
@@ -28,7 +28,7 @@ function validateBrief(input) {
   if (new Set(sections.map(section => section.id)).size !== sections.length || new Set(sections.map(section => section.order)).size !== sections.length) throw new Error("Task card section ids and order values must be unique");
   const reportId = safeId(input.reportId), outlineOrder = [...(input.outlineOrder || sections.flatMap(section => section.outlineItems))].map(String);
   return {
-    schemaVersion: SCHEMA_VERSION, kind: "mint-task-card", skillContractVersion: "mint-report-html/0.13", reportId,
+    schemaVersion: SCHEMA_VERSION, kind: "mint-task-card", skillContractVersion: "mint-report-html/0.14", reportId,
     title: String(input.title).trim(), purpose: String(input.purpose || "管理汇报").trim(), outlineOrder, sections,
     warnings: [...(input.warnings || [])].map(String),
     designContract: { ...DESIGN_CONTRACT, artDirectionSeed: reportId },
@@ -38,7 +38,7 @@ function validateBrief(input) {
 }
 
 function projectFiles(projectDir) {
-  const fixed = ["task-card.json", "report-brief.json", "source-lock.json", "content-map.json", "creative-brief.json", "source-ledger.json", "management-clusters.json", "expression-routes.json", "capacity-report.json", "project-state.json", "build-manifest.json", "asset-manifest.json", "offline-asset-manifest.json", "report-model.json"];
+  const fixed = ["task-card.json", "report-brief.json", "source-lock.json", "content-map.json", "creative-brief.json", "source-ledger.json", "management-clusters.json", "expression-routes.json", "capacity-report.json", "compatibility-report.json", "project-state.json", "build-manifest.json", "asset-manifest.json", "offline-asset-manifest.json", "report-model.json"];
   const names = fixed.filter(name => fs.existsSync(path.join(projectDir, name)));
   for (const root of ["src/scenes", "assets"]) {
     const folder = path.join(projectDir, root); if (!fs.existsSync(folder)) continue;
@@ -53,7 +53,7 @@ function packageEntries(projectDir, manifest) {
   const entries = projectFiles(projectDir).map(name => ({ name, data: fs.readFileSync(path.join(projectDir, name)) }));
   const files = Object.fromEntries(entries.map(entry => [entry.name, sha(entry.data)]));
   const model = entries.find(entry => entry.name === "report-model.json")?.data || Buffer.from("{}");
-  const packageManifest = { schemaVersion: SCHEMA_VERSION, workfileVersion: WORKFILE_VERSION, revision: 1, parentContentHash: null, lineage: [], contentHash: sha(model), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...manifest, immutableFiles: Object.keys(files).filter(name => name !== "report-model.json"), files };
+  const packageManifest = { schemaVersion: SCHEMA_VERSION, workfileVersion: WORKFILE_VERSION, skillContractVersion: "mint-report-html/0.14", capabilities: ["html-authoritative","opaque-media-safe","typed-business-objects","editable-media-layout","native-pptx-adapter","scene-capture-pdf"], revision: 1, parentContentHash: null, lineage: [], contentHash: sha(model), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...manifest, immutableFiles: Object.keys(files).filter(name => name !== "report-model.json"), files };
   return [{ name: "mint-package.json", data: Buffer.from(`${JSON.stringify(packageManifest, null, 2)}\n`) }, ...entries];
 }
 
@@ -126,8 +126,9 @@ function readPackageFile(file) {
 
 function normalizedManifest(entries) {
   const manifest = parseJson(entries, "mint-package.json"), modelHash = sha(entries.get("report-model.json") || Buffer.from("{}"));
-  return { ...manifest, revision: Number(manifest.revision || 1), lineage: [...(manifest.lineage || [])], parentContentHash: manifest.parentContentHash || null, contentHash: manifest.contentHash || modelHash };
+  return { ...manifest, revision: Number(manifest.revision || 1), lineage: [...(manifest.lineage || [])], parentContentHash: manifest.parentContentHash || null, contentHash: manifest.contentHash || modelHash, capabilities:[...(manifest.capabilities||[])] };
 }
+function compatibility(manifest){const source=String(manifest.workfileVersion||"");if(!["0.12","0.14"].includes(source))throw new Error(`Package ${manifest.sectionId||"unknown"} uses unsupported workfile version ${source||"missing"}`);return {sectionId:manifest.sectionId,sourceWorkfileVersion:source,targetWorkfileVersion:WORKFILE_VERSION,sourceSkillContract:manifest.skillContractVersion||"legacy",status:source===WORKFILE_VERSION&&manifest.skillContractVersion==="mint-report-html/0.14"?"current":"upgraded-on-merge",preservedOpaqueMedia:true}}
 
 function verifyPackage(entries, manifest, label) {
   for (const [name, expected] of Object.entries(manifest.files || {})) {
@@ -151,20 +152,42 @@ function resolveSectionPackages(brief, packages) {
 }
 
 function collectIds(value, ids = new Set()) { if (Array.isArray(value)) for (const item of value) collectIds(item, ids); else if (value && typeof value === "object") for (const [key, item] of Object.entries(value)) { if (key === "id" && typeof item === "string") ids.add(item); collectIds(item, ids); } return ids; }
-function replaceString(value, mapping) {
+function replaceStructuredReference(value, mapping) {
   if (mapping.has(value)) return mapping.get(value); let result = value;
   for (const [before, after] of [...mapping.entries()].sort((a, b) => b[0].length - a[0].length)) {
-    result = result.replaceAll(`DU:${before}`, `DU:${after}`).replaceAll(`atoms.${before}`, `atoms.${after}`).replaceAll(`sceneById.${before}`, `sceneById.${after}`);
-    const escaped = before.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); result = result.replace(new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "g"), after);
+    for (const prefix of ["DU:","atoms.","sceneById.","tables.","charts.","media.","diagrams."]) result=result.replaceAll(`${prefix}${before}`,`${prefix}${after}`);
   }
   return result;
 }
-function remap(value, mapping) { if (typeof value === "string") return replaceString(value, mapping); if (Array.isArray(value)) return value.map(item => remap(item, mapping)); if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [mapping.get(key) || key, remap(item, mapping)])); return value; }
+const OPAQUE_FIELDS=new Set(["dataUrl","base64","blob","bytes","opaquePayload","rawText","sourceText","textHash","contentHash","parentContentHash","hash","digest"]);
+function remap(value, mapping, parentKey="") {
+  if (typeof value === "string") return OPAQUE_FIELDS.has(parentKey) ? value : replaceStructuredReference(value,mapping);
+  if (Array.isArray(value)) return value.map(item=>remap(item,mapping,parentKey));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key,item])=>[mapping.get(key)||key,remap(item,mapping,key)]));
+  return value;
+}
+function replaceSceneSource(value,mapping,extension){
+  let result=value;
+  const tokenListAttributes=new Set(["data-content-id","data-atom-ref"]),structuredAttributes=new Set(["data-field-path"]);
+  for(const attribute of ["id","href","aria-controls","data-scene-id","data-content-id","data-atom-ref","data-element-id","data-field-path","data-from","data-to"]){
+    const pattern=new RegExp(`(${attribute}=["'])([^"']*)(["'])`,"g");
+    result=result.replace(pattern,(_match,start,raw,end)=>{
+      if(tokenListAttributes.has(attribute))return `${start}${raw.split(/(\s+)/).map(token=>mapping.get(token)||token).join("")}${end}`;
+      if(structuredAttributes.has(attribute))return `${start}${replaceStructuredReference(raw,mapping)}${end}`;
+      const hash=raw.startsWith("#"),candidate=hash?raw.slice(1):raw;return `${start}${hash?"#":""}${mapping.get(candidate)||candidate}${end}`;
+    });
+  }
+  for(const [before,after] of [...mapping.entries()].sort((a,b)=>b[0].length-a[0].length)){
+    result=result.replaceAll(`DU:${before}`,`DU:${after}`).replaceAll(`atoms.${before}`,`atoms.${after}`).replaceAll(`sceneById.${before}`,`sceneById.${after}`).replaceAll(`tables.${before}`,`tables.${after}`).replaceAll(`charts.${before}`,`charts.${after}`).replaceAll(`media.${before}`,`media.${after}`).replaceAll(`diagrams.${before}`,`diagrams.${after}`);
+    if(extension===".css") result=result.replaceAll(`[data-scene-id="${before}"]`,`[data-scene-id="${after}"]`).replaceAll(`[data-scene-id='${before}']`,`[data-scene-id='${after}']`);
+  }
+  return result;
+}
 function uniqueById(items) { const seen = new Set(); return items.filter(item => { if (!item?.id || seen.has(item.id)) return false; seen.add(item.id); return true; }); }
 
 function mergePackages(briefFile, outputDir, inputFiles) {
   const brief = validateBrief(readJson(briefFile));
-  const packages = inputFiles.map(file => { const entries = readPackageFile(file), manifest = normalizedManifest(entries); verifyPackage(entries, manifest, path.basename(file)); return { file, entries, manifest }; });
+  const packages = inputFiles.map(file => { const entries = readPackageFile(file), manifest = normalizedManifest(entries); verifyPackage(entries, manifest, path.basename(file)); return { file, entries, manifest, compatibility:compatibility(manifest) }; });
   for (const pkg of packages) {
     const manifest = pkg.manifest;
     if (manifest.kind !== "mint-section" || manifest.reportId !== brief.reportId) throw new Error(`Package ${manifest.sectionId || "unknown"} does not belong to ${brief.reportId}`);
@@ -190,17 +213,18 @@ function mergePackages(briefFile, outputDir, inputFiles) {
     mergedBriefs.push(changedCreative); maps.push(changedMap); ledgers.push(changedLedger); locks.push(changedLock); models.push(changedModel); orders.push(...changedCreative.scenes.map(scene => scene.id));
     for (const [name, bytes] of entries) {
       if (!name.startsWith("src/scenes/")) continue; const extension = path.extname(name), oldId = path.basename(name, extension), newId = mapping.get(oldId) || `${prefix}${oldId}`;
-      fs.writeFileSync(path.join(outputDir, "src", "scenes", `${newId}${extension}`), replaceString(bytes.toString("utf8"), combinedMapping));
+      fs.writeFileSync(path.join(outputDir, "src", "scenes", `${newId}${extension}`), replaceSceneSource(bytes.toString("utf8"), combinedMapping, extension));
     }
   }
   const firstMap = maps[0], contentMap = { ...firstMap, schemaVersion: "0.11.0", sourceUnits: maps.flatMap(item => item.sourceUnits || []), discourseUnits: maps.flatMap(item => item.discourseUnits || []), numericClaims: maps.flatMap(item => item.numericClaims || []), contentAtoms: maps.flatMap(item => item.contentAtoms || []), entities: uniqueById(maps.flatMap(item => item.entities || [])), relationships: uniqueById(maps.flatMap(item => item.relationships || [])), semanticGraph: { nodes: maps.flatMap(item => item.semanticGraph?.nodes || []), edges: maps.flatMap(item => item.semanticGraph?.edges || []) } };
   const creativeBrief = { ...mergedBriefs[0], schemaVersion: "0.11.0", status: "planned", narrativeSpine: mergedBriefs.flatMap(item => item.narrativeSpine || []), scenes: mergedBriefs.flatMap(item => item.scenes || []), artDirection: { ...mergedBriefs[0].artDirection, visualMood: brief.artDirection.visualMood, motionLanguage: brief.artDirection.motionLanguage, palette: brief.artDirection.palette, designContract: brief.designContract }, blockingIssues: [] };
   const sourceLock = { schemaVersion: "0.11.0", sourceId: brief.reportId, unitCount: locks.reduce((sum, item) => sum + Number(item.unitCount || 0), 0), unitIds: locks.flatMap(item => item.unitIds || []), unitDigests: Object.assign({}, ...locks.map(item => item.unitDigests || {})), immutable: true };
   const sourceLedger = { schemaVersion: "0.11.0", sourceLockRef: "source-lock.json", contentMapRef: "content-map.json", creativeBriefRef: "creative-brief.json", entries: ledgers.flatMap(item => item.entries || []).map(entry => ({ ...entry, placements: { ...(entry.placements || {}), pptx: "planned-native" } })) };
-  const reportModel = { schemaVersion: "0.11.0", reportId: brief.reportId, reportTitle: brief.title, sceneById: Object.assign({}, ...models.map(item => item.sceneById || {})), atoms: Object.assign({}, ...models.map(item => item.atoms || {})), tables: Object.assign({}, ...models.map(item => item.tables || {})), charts: Object.assign({}, ...models.map(item => item.charts || {})), media: Object.assign({}, ...models.map(item => item.media || {})), diagrams: Object.assign({}, ...models.map(item => item.diagrams || {})), userEdits: models.flatMap(item => item.userEdits || []) };
+  const reportModel = { schemaVersion: "0.11.0", reportIrVersion: "0.14", reportId: brief.reportId, reportTitle: brief.title, sceneById: Object.assign({}, ...models.map(item => item.sceneById || {})), atoms: Object.assign({}, ...models.map(item => item.atoms || {})), tables: Object.assign({}, ...models.map(item => item.tables || {})), charts: Object.assign({}, ...models.map(item => item.charts || {})), media: Object.assign({}, ...models.map(item => item.media || {})), diagrams: Object.assign({}, ...models.map(item => item.diagrams || {})), fieldDependencies: models.flatMap(item=>item.fieldDependencies||[]), pendingDependencyReviews: models.flatMap(item=>item.pendingDependencyReviews||[]), userEdits: models.flatMap(item => item.userEdits || []) };
   const state = createProjectState({ sourceSetHash: sha(JSON.stringify(sourceLock.unitDigests)), sceneOrder: orders, clusters: creativeBrief.scenes.map(scene => ({ clusterId: scene.id, managementQuestion: scene.managementQuestion, sourceUnitRefs: scene.sourceUnitRefs })), artDirectionHash: sha(JSON.stringify(brief.designContract)), requestedProfile: "review", structuralChange: true, contentChange: true, affectedSceneIds: orders, openIssues: [] }); state.structureState = "frozen";
   writeJson(path.join(outputDir, "task-card.json"), brief); writeJson(path.join(outputDir, "report-brief.json"), brief); writeJson(path.join(outputDir, "source-lock.json"), sourceLock); writeJson(path.join(outputDir, "content-map.json"), contentMap); writeJson(path.join(outputDir, "creative-brief.json"), creativeBrief); writeJson(path.join(outputDir, "source-ledger.json"), sourceLedger); writeJson(path.join(outputDir, "report-model.json"), reportModel); writeJson(path.join(outputDir, "project-state.json"), state);
   writeJson(path.join(outputDir, "management-clusters.json"), { schemaVersion: "0.11.0", clusters: creativeBrief.scenes.map(scene => ({ clusterId: scene.id, managementQuestion: scene.managementQuestion, sourceUnitRefs: scene.sourceUnitRefs })) });
+  writeJson(path.join(outputDir,"compatibility-report.json"),{schemaVersion:"0.14.0",reportIrVersion:"0.14",passed:true,sections:selected.map(item=>item.compatibility)});
   writeJson(path.join(outputDir, "build-manifest.json"), { schemaVersion: SCHEMA_VERSION, sourceSetHash: state.sourceSetHash, structureHash: state.structureHash, currentSceneOrder: orders, affectedSceneIds: orders, outputs: { html: "pending", formalPdf: "pending", pptx: "pending" }, generatedAt: new Date().toISOString() }); fs.writeFileSync(path.join(outputDir, "session-brief.md"), sessionBrief(state));
   const assembled = spawnSync(process.execPath, [path.join(here, "assemble-creative-report.mjs"), outputDir, path.join(outputDir, "report.html")], { encoding: "utf8", maxBuffer: 40_000_000 }); if (assembled.status !== 0) throw new Error(assembled.stderr || assembled.stdout || "Merged HTML assembly failed");
   const workFile = path.join(outputDir, `${brief.reportId}-review.mint-report.html`), packed = writePackageOutput("mint-report", outputDir, briefFile, null, workFile);

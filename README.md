@@ -14,6 +14,16 @@ https://github.com/chuhanma2-coder/mint-report-html
 
 安装完成后，建议新建一个任务再开始使用。
 
+Windows 用户可在 PowerShell 中执行以下命令更新到 GitHub `main` 的最新版（旧版会移到 `%USERPROFILE%\.codex\skill-backups`，不会直接删除）：
+
+```powershell
+$mintUpdate = Join-Path $env:TEMP ("mint-report-html-update-" + [guid]::NewGuid())
+git clone --depth 1 https://github.com/chuhanma2-coder/mint-report-html.git $mintUpdate
+powershell -ExecutionPolicy Bypass -File (Join-Path $mintUpdate "scripts\install-windows.ps1")
+```
+
+更新后请关闭旧任务并新建任务，再明确说“使用 `$mint-report-html`”。如这台电脑只使用 HTML Skill，可在安装命令末尾加 `-DeactivateDeck`，把旧的 `mint-report-deck` 移出活跃 Skill 目录，避免误调用。
+
 普通使用者采用 HTML-only：活跃 Skill 目录中只保留一个 `mint-report-html`。macOS 通常是 `~/.codex/skills`，Windows 通常是 `%USERPROFILE%\.codex\skills`。不用的 deck Skill 和历史备份移动到任意自选备份目录，但不要留在活跃 Skill 目录；不要求使用 WD 或任何外接盘。可运行 `node scripts/check-skill-installation.mjs` 检查冲突。
 
 ## 使用
@@ -73,4 +83,4 @@ https://github.com/chuhanma2-coder/mint-report-html
 
 这是独立 Skill，不会修改 `mint-report-deck` 的代码。为避免普通使用者误调用，HTML-only电脑不保留活跃的 deck Skill；确实需要 PPT-only、固定页数或严格跨格式几何一致时，再单独安装并显式调用 deck。
 
-当前候选版本：`v0.13.0-rc.1`。本版增加管理决策页预算、财务/估值/预算数据形状路由、共享绝对坐标与零轴、章节一次打包验证、跨平台安装检查和真实经营汇报组合样本。首次和个人审阅只生成工作 HTML；PPTX/PDF 只在最终发布生成一次。
+当前正式版本：`v0.15.0`。本版增加页面合并与密度门禁、完整图片编辑、图表字段依赖、PDF 两阶段成品验证、PPTX 颜色/媒体/几何/视觉门禁，以及 Windows 一键安全更新。首次和个人审阅只生成工作 HTML；PPTX/PDF 只在最终发布生成一次，且下游适配器不得反向修改或降低 HTML 效果。

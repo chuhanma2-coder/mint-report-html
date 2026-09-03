@@ -15,6 +15,21 @@ jobs:
       - name: Validate skill
         shell: pwsh
         run: |
+          Get-ChildItem scripts,assets -Recurse -File | Where-Object { $_.Extension -in '.js','.mjs' } | ForEach-Object { node --check $_.FullName }
           node tests/v09-contracts.mjs
           node tests/v091-visual-contracts.mjs
           node tests/v093-performance-contracts.mjs
+          node tests/v010-assets-and-promotion.mjs
+          node tests/v010-interaction-contracts.mjs
+          node tests/v011-routing-contracts.mjs
+          node tests/v012-performance-contracts.mjs
+          node tests/v012-report-model-sync.mjs
+          node tests/v012-routing-selector.mjs
+          node tests/v013-targeted-regressions.mjs
+          node tests/v014-export-contracts.mjs
+      - name: Validate Windows installer syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path scripts/install-windows.ps1), [ref]$null, [ref]$errors)
+          if ($errors.Count) { $errors | Format-List; exit 1 }

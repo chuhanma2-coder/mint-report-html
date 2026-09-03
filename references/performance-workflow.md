@@ -48,7 +48,11 @@ node scripts/run-creative-workflow.mjs publish <project-dir>
 
 - Review: all current Scenes at desktop; creates `report.html`. Add `--preview-pdf` only when the user actually needs a PDF preview.
 - Revision: affected Scenes at desktop; does not regenerate PDF unless requested.
-- Publish: all Scenes at desktop, laptop, print, interaction, edit-geometry, and collision gates. Phone viewports are not part of authoring or QA. One browser session creates the current PDF and `publish-snapshot.json`; native PPTX extraction reuses the verified layout snapshot instead of launching another browser.
+- Publish: all Scenes at desktop, laptop, print, interaction, edit-geometry, and collision gates. Phone viewports are not part of authoring or QA. One browser session creates `publish-snapshot.json`; the PDF adapter runs `prepareForExport → renderSceneToBitmap → assemblePdf → verifyPdf`, and native PPTX extraction reuses the verified layout snapshot instead of launching another browser. Neither adapter rewrites Scene HTML/CSS or mutates the live HTML DOM.
+
+PDF has two success gates. Scene Capture Gate waits for `document.fonts.ready`, image decode, typed-object `renderReady`, committed edits, and resolved field dependencies before accepting a fixed 1920×1080 capture. PDF Artifact Gate then verifies page count, 16:9 ratio, nonblank visual coverage, and current content identity. `file://` uses the same contract through the browser-side bitmap renderer; `window.print()` is forbidden.
+
+PPTX is an adapter over the current semantic layout snapshot. It preserves computed container fills and accents, actual media bytes and the saved media fit/scale/focal-position contract when the adapter supports it, explicit chart direction, shared axes, table column tracks, and diagram node positions. Unsupported semantic objects or missing/corrupt media block PPTX only; they never trigger a simpler HTML layout.
 
 A successful Publish also writes `delivery-manifest.json` and sets `project-state.deliveryStatus=formal-ready`. Review and Revision can never create that state.
 

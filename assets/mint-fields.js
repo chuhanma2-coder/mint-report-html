@@ -18,6 +18,28 @@
     return [parent, key];
   }
   function read(fieldPath) { const current = model(), [parent, key] = resolve(current, fieldPath); return parent[key]; }
+  function setPath(current, fieldPath, value) { const [parent,key]=resolve(current,fieldPath);parent[key]=value; }
+  function dependencyValue(source,binding={}) {
+    const series=(source?.series||[])[Number(binding.series||0)],values=series?.values||[],index=binding.category==null?Number(binding.index||0):(source?.categories||[]).indexOf(binding.category);
+    const value=Number(values[index]);if(!Number.isFinite(value))return null;
+    const digits=Number.isInteger(binding.digits)?binding.digits:2,scaled=value*Number(binding.multiplier||1),text=scaled.toFixed(digits).replace(/(\.\d*?[1-9])0+$|\.0+$/,'$1');
+    return `${binding.prefix||''}${text}${binding.suffix||''}`;
+  }
+  function applyDependencies(current,sourcePath) {
+    const dependencies=(current.fieldDependencies||[]).filter(item=>item?.sourcePath===sourcePath),pending=new Set(current.pendingDependencyReviews||[]);
+    for(const dependency of dependencies){
+      const id=dependency.id||`${dependency.sourcePath}->${dependency.targetPath}`;
+      if(dependency.mode==='review-required'){pending.add(id);continue}
+      if(dependency.mode!=='derived'||!dependency.targetPath||!dependency.template)continue;
+      const source=readFrom(current,sourcePath);let text=String(dependency.template),complete=true;
+      for(const [name,binding] of Object.entries(dependency.bindings||{})){const value=dependencyValue(source,binding);if(value==null){complete=false;break}text=text.replaceAll(`{{${name}}}`,value)}
+      if(!complete)throw new Error(`无法重算派生字段 ${dependency.targetPath}`);
+      setPath(current,dependency.targetPath,text);pending.delete(id);
+      for(const node of q('[data-field-path]'))if(node.dataset.fieldPath===dependency.targetPath&&!node.dataset.editKind)node.textContent=text;
+    }
+    current.pendingDependencyReviews=[...pending];
+  }
+  function readFrom(current,fieldPath){const [parent,key]=resolve(current,fieldPath);return parent[key]}
   function markStale() {
     document.querySelector('meta[name="mint-pdf-state"]')?.setAttribute('content', 'stale-after-html-edit');
     q('[data-export-pdf]').forEach(button => button.textContent = '重新生成当前编辑版本 PDF');
@@ -44,6 +66,7 @@
     const current = model(), [parent, key] = resolve(current, fieldPath);
     if (JSON.stringify(parent[key]) === JSON.stringify(value)) return pending;
     parent[key] = value;
+    applyDependencies(current, fieldPath);
     if (kind === 'text') for (const other of q('[data-field-path]')) if (other !== sourceNode && other.dataset.fieldPath === fieldPath && !other.dataset.editKind) other.textContent = String(value);
     return commit(current, { fieldPath, kind });
   }

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { geometryAuditInPage } from "./geometry-audit.mjs";
 import { interactionDomAuditInPage } from "./interaction-contract.mjs";
 import { pptLayoutInPage } from "./extract-ppt-layout.mjs";
+import { captureScenesToPdf } from "./pdf-renderer.mjs";
 
 const input = path.resolve(process.argv[2] || "");
 const outputFile = path.resolve(process.argv[3] || path.join(path.dirname(input || "."), "visual-qa.json"));
@@ -25,7 +25,7 @@ const profile = profileArg || projectState?.qaProfile || "review";
 if (profile === "publish" && projectState?.structureState !== "frozen") { console.error("Publish QA requires structureState=frozen"); process.exit(1); }
 const allViewports = [{ name: "desktop", width: 1920, height: 1080 }, { name: "laptop", width: 1280, height: 720 }];
 const viewports = profile === "publish" ? allViewports : [allViewports[0]];
-const issues = [], results = []; let publishLayout = null;
+const issues = [], results = []; let publishLayout = null; const publishSceneCaptures=[];
 fs.mkdirSync(shots, { recursive: true });
 for (const viewport of viewports) {
   const page = await browser.newPage({ viewport });
@@ -206,6 +206,10 @@ for (const viewport of viewports) {
     const returned = await page.evaluate(() => document.querySelector('[data-scene-target][aria-current="true"]') === document.querySelector('[data-scene-target]'));
     if (!returned) issues.push({ viewport: viewport.name, gate: "navigation", message: "上一页按钮未返回前一场景" });
   }
+  if(profile==='publish'&&viewport.name==='desktop'){
+    const folder=path.join(shots,'publish-scenes');fs.mkdirSync(folder,{recursive:true});
+    const sceneNodes=await page.locator('.mint-scene').all();for(let index=0;index<sceneNodes.length;index++){const file=path.join(folder,`scene-${String(index+1).padStart(2,'0')}.png`);await sceneNodes[index].locator('.mint-scene__stage').screenshot({path:file,animations:'disabled'});publishSceneCaptures.push({sceneId:await sceneNodes[index].getAttribute('data-scene-id'),file:path.basename(file)})}
+  }
   if (profile === 'revision') {
     for (const id of scenesArg) await page.locator(`section[data-scene-id="${id}"]`).screenshot({ path: path.join(shots, `${viewport.name}-${id}.png`), animations: 'disabled' });
   } else await page.screenshot({ path: path.join(shots, `${viewport.name}.png`), fullPage: true, animations: "disabled" });
@@ -213,24 +217,13 @@ for (const viewport of viewports) {
   for (const error of runtimeErrors) issues.push({ viewport: viewport.name, gate: "runtime", message: error });
   await page.close();
 }
-const printPage = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
-await printPage.goto(pathToFileURL(input).href, { waitUntil: "load" });
-await printPage.emulateMedia({ media: "print", reducedMotion: "reduce" });
-const printState = await printPage.evaluate(() => ({ hiddenDetails: [...document.querySelectorAll(".mint-details[hidden]")].filter((node) => getComputedStyle(node).display === "none").length, visibleControls: [...document.querySelectorAll(".mint-nav,.mint-edit-status,.mint-control,.mint-page-arrow,.mint-edit-toggle")].filter((node) => getComputedStyle(node).display !== "none").length, scenes:[...document.querySelectorAll('.mint-scene')].map(scene=>{const page=scene.getBoundingClientRect(),stage=scene.querySelector('.mint-scene__stage')?.getBoundingClientRect();return{id:scene.dataset.sceneId,text:scene.innerText.trim().length,pageWidth:page.width,pageHeight:page.height,stageWidth:stage?.width||0,stageHeight:stage?.height||0}}) }));
-if (printState.hiddenDetails) issues.push({ gate: "print", message: "打印状态仍隐藏必要详情" });
-if (printState.visibleControls) issues.push({ gate: "print", message: "打印状态仍显示交互控件" });
-for (const scene of printState.scenes) if (!scene.text || scene.stageWidth < scene.pageWidth * .95 || scene.stageHeight < scene.pageHeight * .95) issues.push({ gate: "pdf-nonblank", sceneId: scene.id, message: `打印页面为空或内容画布缩放异常：${scene.stageWidth}×${scene.stageHeight}` });
-if (profile === "publish" && pdfOutput && pdfManifest && !issues.length) {
-  fs.mkdirSync(path.dirname(path.resolve(pdfOutput)), { recursive: true });
-  await printPage.pdf({ path: path.resolve(pdfOutput), width: "16in", height: "9in", printBackground: true, preferCSSPageSize: true, displayHeaderFooter: false, margin: { top: "0", right: "0", bottom: "0", left: "0" } });
-  const model = await printPage.locator("#mint-creative-data").textContent(), contentHash = crypto.createHash("sha256").update(model || "").digest("hex"), pdfBytes = fs.readFileSync(path.resolve(pdfOutput));
-  const pdfPageCount=(pdfBytes.toString("latin1").match(/\/Type\s*\/Page\b/g)||[]).length;
-  if (pdfPageCount !== printState.scenes.length) issues.push({ gate:"pdf-page-count", message:`PDF页数 ${pdfPageCount} 与场景数 ${printState.scenes.length} 不一致` });
-  if (!issues.length) { const original = fs.readFileSync(input, "utf8"), updated = original.replace(/<meta name="mint-pdf-state" content="[^"]*">/g, "").replace(/<meta name="mint-pdf-content-hash" content="[^"]*">/g, "").replace("</head>", `<meta name="mint-pdf-state" content="available"><meta name="mint-pdf-content-hash" content="${contentHash}"></head>`); fs.writeFileSync(input, updated); fs.writeFileSync(path.resolve(pdfManifest), `${JSON.stringify({ schemaVersion:"0.12.0",status:"matched",kind:"formal",mode:"validated-print-session",htmlFile:path.basename(input),pdfFile:path.basename(pdfOutput),contentHash,htmlHash:crypto.createHash("sha256").update(updated).digest("hex"),pdfHash:crypto.createHash("sha256").update(pdfBytes).digest("hex"),sceneCount:printState.scenes.length,pdfPageCount,generatedAt:new Date().toISOString(),exportState:printState },null,2)}\n`); }
-}
+const printPage=await browser.newPage({viewport:{width:1920,height:1080}});await printPage.goto(pathToFileURL(input).href,{waitUntil:"load"});
+const printState=await printPage.evaluate(()=>({scenes:[...document.querySelectorAll('.mint-scene')].map(scene=>({id:scene.dataset.sceneId,text:scene.innerText.trim().length})),pendingDependencies:window.mintFields?.model?.().pendingDependencyReviews?.length||0}));
+for(const scene of printState.scenes)if(!scene.text)issues.push({gate:"pdf-nonblank",sceneId:scene.id,message:"Scene没有正式内容"});if(printState.pendingDependencies)issues.push({gate:"pdf-dependency",message:`有 ${printState.pendingDependencies} 条图表关联结论待确认`});
+if(profile==="publish"&&pdfOutput&&pdfManifest&&!issues.length){try{await captureScenesToPdf({page:printPage,browser,input,pdfFile:path.resolve(pdfOutput),manifestFile:path.resolve(pdfManifest),kind:"formal"})}catch(error){issues.push({gate:"pdf-artifact",message:error.message})}}
 await printPage.close();
 await browser.close();
-if (snapshotFile && publishLayout && !issues.length) { fs.mkdirSync(path.dirname(path.resolve(snapshotFile)), { recursive: true }); fs.writeFileSync(path.resolve(snapshotFile), `${JSON.stringify({ schemaVersion:"0.12.0",contentHash:publishLayout.contentHash,layout:publishLayout,createdAt:new Date().toISOString() },null,2)}\n`); }
+if (snapshotFile && publishLayout && !issues.length) { fs.mkdirSync(path.dirname(path.resolve(snapshotFile)), { recursive: true }); fs.writeFileSync(path.resolve(snapshotFile), `${JSON.stringify({ schemaVersion:"0.15.0",contentHash:publishLayout.contentHash,layout:publishLayout,sceneCaptures:publishSceneCaptures,createdAt:new Date().toISOString() },null,2)}\n`); }
 const report = { schemaVersion: "0.10.0-rc.1", profile, checkedSceneIds: scenesArg.length ? scenesArg : profile === "revision" ? (projectState?.affectedSceneIds || []) : "all", passed: issues.length === 0, results, printState, issues };
 fs.writeFileSync(outputFile, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify({ passed: report.passed, viewports: results.length, issues: issues.length, outputFile }, null, 2));

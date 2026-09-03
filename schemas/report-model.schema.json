@@ -11,7 +11,8 @@
     "charts": { "type": "object" },
     "media": { "type": "object" },
     "diagrams": { "type": "object" },
+    "fieldDependencies": { "type": "array" },
+    "pendingDependencyReviews": { "type": "array" },
     "userEdits": { "type": "array" }
   }
 }
-

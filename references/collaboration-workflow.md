@@ -141,4 +141,4 @@ ZIP 只用于排障、兼容旧项目或长期归档：
 node scripts/collaboration-package.mjs export-zip A-当前版.mint-section.html A-technical.mint-section.zip
 ```
 
-合并器兼容 v0.11 ZIP，但 v0.12 正常用户流程不要求负责人反复导出 ZIP。
+v0.14 合并器读取 v0.12 和 v0.14 工作文件，并输出 `compatibility-report.json`。旧包在合并时显式升级；Scene、Atom 和业务对象 ID 只在结构化引用位置加命名空间，base64、data URL、二进制素材、原文、引文和哈希保持逐字节不变。未知版本直接阻断。正常用户流程仍不要求负责人反复导出 ZIP。

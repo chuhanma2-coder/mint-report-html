@@ -14,6 +14,8 @@ export function createReportModel(projectDir) {
     charts: {},
     media: {},
     diagrams: {},
+    fieldDependencies: [],
+    pendingDependencyReviews: [],
     userEdits: []
   };
   const modelFile = path.join(projectDir, "report-model.json");
@@ -41,6 +43,8 @@ export function createReportModel(projectDir) {
     charts: saved.charts || {},
     media: saved.media || {},
     diagrams: saved.diagrams || {},
+    fieldDependencies: Array.isArray(saved.fieldDependencies) ? saved.fieldDependencies : [],
+    pendingDependencyReviews: Array.isArray(saved.pendingDependencyReviews) ? saved.pendingDependencyReviews : [],
     userEdits: Array.isArray(saved.userEdits) ? saved.userEdits : []
   };
 }
