@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "1",
+  "skillVersion": "0.15.0",
+  "reportIrVersion": "0.14",
+  "interfaces": {
+    "extractLayout": "scripts/extract-ppt-layout.mjs",
+    "exportEditablePptx": "scripts/export-editable-pptx.mjs",
+    "themeEnvironment": "MINT_PPT_THEME_FILE",
+    "packSectionSync": "scripts/collaboration-package.mjs pack-section-sync"
+  }
+}
